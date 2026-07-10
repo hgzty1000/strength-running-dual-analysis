@@ -1,0 +1,52 @@
+{% macro nav(active) -%}
+<nav class="side-nav">
+  <div class="brand">力跑双训分析系统</div>
+  {% for href,label,key in [('/', '首页','home'),('/data/garmin','数据','data'),('/goals/current','目标','goals'),('/rest-notes','休整标注','rest'),('/analysis/new','分析','analysis'),('/reports','报告','reports'),('/settings/profile','设置','settings')] %}
+    <a class="nav-link {{ 'active' if active==key else '' }}" href="{{ href }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+{%- endmacro %}
+
+{% macro mobile_nav() -%}
+<details class="mobile-menu">
+  <summary>☰ 力跑双训分析系统</summary>
+  <a href="/">首页</a>
+  <a href="/data/garmin">数据</a>
+  <a href="/goals/current">目标</a>
+  <a href="/rest-notes">休整标注</a>
+  <a href="/analysis/new">分析</a>
+  <a href="/reports">报告</a>
+  <a href="/settings/profile">设置</a>
+</details>
+{%- endmacro %}
+
+{% macro layout_start(active, title, user) -%}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} - 力跑双训分析系统</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+{{ mobile_nav() }}
+<div class="app-shell">
+  {{ nav(active) }}
+  <main class="content">
+    <header class="page-header">
+      <h1>{{ title }}</h1>
+      {% if user %}<form method="post" action="/api/auth/logout"><button class="ghost" type="submit">退出 {{ user.username }}</button></form>{% endif %}
+    </header>
+{%- endmacro %}
+
+{% macro layout_end() -%}
+  </main>
+</div>
+</body>
+</html>
+{%- endmacro %}
+
+{% macro card(title) -%}
+<section class="card"><h2>{{ title }}</h2>{{ caller() }}</section>
+{%- endmacro %}

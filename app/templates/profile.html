@@ -1,0 +1,20 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('settings', '设置 / 用户档案', user) }}
+{% call card('用户档案') %}
+<form method="post" action="/api/settings/profile" class="form">
+  <label>身高 cm<input name="height_cm" type="number" step="0.1" inputmode="decimal" value="{{ profile.height_cm or '' }}"></label>
+  <label>体重 kg<input name="weight_kg" type="number" step="0.1" inputmode="decimal" value="{{ profile.weight_kg or '' }}"></label>
+  <label>出生年份<input name="birth_year" type="number" min="1900" max="2100" step="1" placeholder="如 1985" value="{{ profile.birth_year or '' }}"></label>
+  <label>性别
+    <select name="sex">
+      {% for v,t in [('','未设置'),('male','男'),('female','女'),('other','其他')] %}<option value="{{v}}" {{ 'selected' if profile.sex==v else '' }}>{{t}}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">保存</button>
+</form>
+<p class="muted small">用户档案不存目标。目标请到「目标」页面维护。</p>
+{% endcall %}
+{% call card('设置导航') %}
+<a class="button secondary" href="/settings/credentials">凭证设置</a>
+{% endcall %}
+{{ layout_end() }}

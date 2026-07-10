@@ -1,0 +1,76 @@
+== type(部位)分布 ==
+背	39
+胸	33
+腿	33
+自重	31
+肩	23
+腹部	22
+三头	21
+二头	20
+前臂	11
+臀部	8
+小腿	7
+计时动作	6
+有氧	4
+全身	1
+
+== exetype 分布 ==
+''	225
+'times'	15
+'record'	7
+'cardio'	4
+'help'	3
+'plus_weight'	3
+'stretch'	2
+
+== 每个 type 下抽 5 个动作名 ==
+[胸] 杠铃卧推 / 上斜杠铃卧推 / 下斜杠铃卧推 / 哑铃卧推 / 上斜哑铃卧推
+[背] 宽距下拉 / 窄距下拉 / 杠铃划船 / 反手杠铃划船 / 绳索直臂下压
+[腿] 深蹲 / 前蹲 / 硬拉 / 相扑位硬拉 / 高翻
+[肩] 哑铃推肩 / 阿诺德推肩 / 侧平举 / 俯身侧平举 / 器械侧平举
+[二头] 哑铃弯举 / 哑铃轮换弯举 / 坐姿哑铃弯举 / 牧师凳弯举 / 牧师凳弯举(反向)
+[三头] 哑铃过头臂屈伸 / 坐姿杠铃过头臂屈伸 / 仰卧杠铃臂屈伸 / 绳索臂屈伸 / 跪姿绳索臂屈伸
+[小腿] 坐姿杠铃提踵 / 站姿哑铃提踵 / 坐姿器械提踵 / 坐姿器械提踵(版本2) / 站姿器械提踵
+[前臂] 正手杠铃手腕弯举 / 正手杠铃弯举 / EZ正手杠铃弯举 / 正手杠铃手腕弯举（平板） / 正手杠铃手腕弯举（平板v2）
+[臀部] 早安 / 杠铃臀冲 / 史密斯臀冲 / 器械后踢 / 后踢
+[腹部] 3/4 仰卧起坐 / 负重仰卧起坐 / 仰卧抬腿 / 抬腿 / 平板抬腿
+[自重] 平躺哑铃卧推 / 跪姿俯卧撑 / 弹力绳-前推 / 弹力绳-俯身划船 / 弹力绳-坐姿划船
+[有氧] 跑步 / 游泳 / 动感单车 / 室外自行车
+[计时动作] 平板支撑 / 跑步 / 游泳 / 动感单车 / 跳绳
+[全身] 波比跳
+
+== 非空 exetype 的动作(看有氧/计时类长啥样) ==
+俯卧撑 | type=胸 | exetype=times | aliases=[]
+双杠臂屈伸（辅助） | type=胸 | exetype=help | aliases=[]
+引体向上（辅助） | type=背 | exetype=help | aliases=[]
+窄距引体向上（辅助） | type=背 | exetype=help | aliases=[]
+3/4 仰卧起坐 | type=腹部 | exetype=times | aliases=[]
+仰卧抬腿 | type=腹部 | exetype=times | aliases=[]
+抬腿 | type=腹部 | exetype=times | aliases=[]
+平板抬腿 | type=腹部 | exetype=times | aliases=[]
+转体抬腿 | type=腹部 | exetype=times | aliases=[]
+空中单车 | type=腹部 | exetype=times | aliases=[]
+空中单车(高难度版) | type=腹部 | exetype=times | aliases=[]
+平躺跪姿转体 | type=腹部 | exetype=times | aliases=[]
+保护式卷腹 | type=腹部 | exetype=times | aliases=[]
+平躺抬腿 | type=腹部 | exetype=times | aliases=[]
+腹肌轮收 | type=腹部 | exetype=times | aliases=[]
+上斜卷腹转体 | type=腹部 | exetype=times | aliases=[]
+卷腹 | type=腹部 | exetype=times | aliases=[]
+平板支撑 | type=腹部 | exetype=record | aliases=[]
+跪姿俯卧撑 | type=自重 | exetype=plus_weight | aliases=[]
+肩内外旋动态拉伸 | type=自重 | exetype=plus_weight | aliases=[]
+三角肌后束拉伸 | type=自重 | exetype=stretch | aliases=[]
+单手扶墙拉伸 | type=自重 | exetype=stretch | aliases=[]
+水瓶俄罗斯转体 | type=自重 | exetype=plus_weight | aliases=[]
+跑步 | type=有氧 | exetype=cardio | aliases=[]
+游泳 | type=有氧 | exetype=cardio | aliases=[]
+动感单车 | type=有氧 | exetype=cardio | aliases=[]
+室外自行车 | type=有氧 | exetype=cardio | aliases=[]
+平板支撑 | type=计时动作 | exetype=record | aliases=[]
+跑步 | type=计时动作 | exetype=record | aliases=[]
+游泳 | type=计时动作 | exetype=record | aliases=[]
+动感单车 | type=计时动作 | exetype=record | aliases=[]
+跳绳 | type=计时动作 | exetype=record | aliases=[]
+瑜伽 | type=计时动作 | exetype=record | aliases=[]
+波比跳 | type=全身 | exetype=times | aliases=[]

@@ -1,0 +1,29 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('rest', '休整标注', user) }}
+{% call card('新增休整标注') %}
+<form method="post" action="/api/rest-notes" class="form">
+  <label>开始日期<input name="start_date" type="date" required></label>
+  <label>结束日期<input name="end_date" type="date" required></label>
+  <label>影响范围
+    <select name="affected_scope" required>
+      {% for v,t in [('running','跑步'),('strength','力量'),('legs','腿部'),('all','全部'),('custom','自定义')] %}
+      <option value="{{v}}">{{t}}</option>{% endfor %}
+    </select>
+  </label>
+  <label>备注<textarea name="note" required placeholder="如: 膝部手术后暂停跑步和腿训, 上肢正常"></textarea></label>
+  <button type="submit">保存休整标注</button>
+</form>
+<p class="muted small">休整标注解释过去某段的缺训/异常, 供分析时纠偏。当前/未来的判断尺请到「目标」维护。</p>
+{% endcall %}
+{% call card('已有休整标注') %}
+{% for n in notes %}
+  <div class="activity-card">
+    <div><strong>{{ n.start_date }} ~ {{ n.end_date }}</strong> · {{ n.affected_scope }}</div>
+    <div>{{ n.note }}</div>
+    <form method="post" action="/api/rest-notes/{{ n.id }}/delete" style="margin-top:6px"><button class="secondary">删除</button></form>
+  </div>
+{% else %}
+  <p class="muted">暂无休整标注。</p>
+{% endfor %}
+{% endcall %}
+{{ layout_end() }}

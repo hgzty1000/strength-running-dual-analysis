@@ -1,0 +1,61 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('analysis', '分析', user) }}
+{% call card('分析前检查') %}
+<p>当前目标: <strong>{{ goal.primary_goal if goal else '未配置' }}</strong>{% if goal %} · v{{ goal.version_number }}{% endif %}</p>
+<p>力量训练日: <strong>{{ strength_days }}</strong> 天 · Garmin 活动: <strong>{{ garmin_count }}</strong> 条 · 历史报告: <strong>{{ report_count }}</strong> 份</p>
+<p>休整标注: <strong>{{ rest_notes|length }}</strong> 条 · LLM 增强: <strong>{{ '可用' if has_llm else '未配置(用规则引擎)' }}</strong></p>
+{% if not goal %}<p class="alert">请先到「目标」配置当前目标, 否则无法给出取舍判断。</p>{% endif %}
+<form id="analysis-form" class="form inline">
+  <label>开始日期<input name="covered_start_date" type="date"></label>
+  <label>结束日期<input name="covered_end_date" type="date"></label>
+  <button type="submit" {{ 'disabled' if not goal else '' }}>生成分析报告</button>
+</form>
+<div id="analysis-status" style="margin-top:12px; display:none">
+  <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden">
+    <div id="analysis-bar" style="background:var(--primary); height:100%; width:0%; transition:width .4s"></div>
+  </div>
+  <p id="analysis-text" class="muted small" style="margin-top:6px"></p>
+</div>
+<p class="muted small">留空日期则自动覆盖已有数据区间。{% if has_llm %}将调用大模型生成叙述层, 可能耗时几十秒。{% else %}当前用规则引擎, 通常很快。{% endif %}分析只读数据, 不修改任何训练记录。</p>
+<script>
+document.getElementById('analysis-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const btn = form.querySelector('button');
+  const box = document.getElementById('analysis-status');
+  const bar = document.getElementById('analysis-bar');
+  const text = document.getElementById('analysis-text');
+  btn.disabled = true; box.style.display = 'block';
+  text.className = 'muted small'; text.textContent = '正在构建分析上下文并生成报告…';
+  // 不确定进度的伪进度条: 缓慢推进到 90%, 完成后到 100%
+  let pct = 8; bar.style.width = pct + '%';
+  const tick = setInterval(() => { pct = Math.min(90, pct + 3); bar.style.width = pct + '%'; }, 900);
+  try {
+    const fd = new FormData(form);
+    const resp = await fetch('/api/analysis/reports', {method:'POST', headers:{'Accept':'application/json'}, body:fd});
+    const data = await resp.json();
+    clearInterval(tick);
+    if (data.ok && data.redirect) {
+      bar.style.width = '100%';
+      text.textContent = '生成完成, 正在打开报告…';
+      location.href = data.redirect;
+    } else {
+      bar.style.width = '100%'; bar.style.background = 'var(--danger)';
+      text.className = 'alert'; text.textContent = '生成失败: ' + (data.error || '未知错误');
+      btn.disabled = false;
+    }
+  } catch (err) {
+    clearInterval(tick);
+    bar.style.background = 'var(--danger)';
+    text.className = 'alert'; text.textContent = '请求失败: ' + err;
+    btn.disabled = false;
+  }
+});
+</script>
+{% endcall %}
+{% if rest_notes %}
+{% call card('当前休整标注') %}
+{% for n in rest_notes %}<div class="activity-card">{{ n.start_date }} ~ {{ n.end_date }} · {{ n.affected_scope }} · {{ n.note }}</div>{% endfor %}
+{% endcall %}
+{% endif %}
+{{ layout_end() }}

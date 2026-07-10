@@ -1,0 +1,23 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('goals', '目标', user) }}
+{% call card('当前目标配置') %}
+<form method="post" action="/api/goals" class="form">
+  <label>主目标
+    <select name="primary_goal" required>
+      {% for v,t in [('balanced','双线平衡'),('running_race_priority','跑步比赛/成绩优先'),('strength_physique_priority','力量/体型优先'),('recovery_priority','恢复优先'),('fat_loss_priority','减脂/体重控制优先'),('custom','自定义')] %}
+      <option value="{{v}}" {{ 'selected' if goal and goal.primary_goal==v else '' }}>{{t}}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>跑步目标说明<textarea name="running_goal_text">{{ goal.running_goal_text if goal else '' }}</textarea></label>
+  <label>力量底线说明<textarea name="strength_baseline_text">{{ goal.strength_baseline_text if goal else '' }}</textarea></label>
+  <label>冲突取舍说明<textarea name="conflict_policy_text">{{ goal.conflict_policy_text if goal else '' }}</textarea></label>
+  <label>不确定项<textarea name="uncertainties_text">{{ goal.uncertainties_text if goal else '' }}</textarea></label>
+  <label>生效日期<input name="effective_from" type="date" value="{{ goal.effective_from if goal else '' }}"></label>
+  <button type="submit">保存为新版本</button>
+</form>
+{% endcall %}
+{% call card('历史版本') %}
+{% for h in history %}<div class="activity-card">v{{ h.version_number }} · {{ h.primary_goal }} · {{ h.effective_from }} {{ '· 当前' if h.is_current else '' }}</div>{% else %}<p class="muted">暂无目标版本。</p>{% endfor %}
+{% endcall %}
+{{ layout_end() }}

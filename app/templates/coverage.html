@@ -1,0 +1,27 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('data', '数据 / 覆盖', user) }}
+<div class="actions">
+  <a class="button secondary" href="/data/garmin">Garmin</a>
+  <a class="button secondary" href="/data/xunji">训记</a>
+  <a class="button secondary" href="/data/coverage">数据覆盖</a>
+  <a class="button secondary" href="/data/muscles">动作肌群</a>
+</div>
+{% call card('力量 (训记)') %}
+<dl class="kv">
+  <dt>日期范围</dt><dd>{{ coverage.xunji.date_range[0] or '-' }} ~ {{ coverage.xunji.date_range[1] or '-' }}</dd>
+  <dt>训练日</dt><dd>{{ coverage.xunji.training_days }}</dd>
+  <dt>待补肌群动作</dt><dd>{{ coverage.xunji.pending_muscle_mappings }}</dd>
+</dl>
+{% endcall %}
+{% call card('跑步 (Garmin)') %}
+<dl class="kv">
+  <dt>日期范围</dt><dd>{{ coverage.garmin.date_range[0] or '-' }} ~ {{ coverage.garmin.date_range[1] or '-' }}</dd>
+  <dt>跑步活动</dt><dd>{{ coverage.garmin.running_activities }}</dd>
+  <dt>缺气温次数</dt><dd>{{ coverage.garmin.missing_temperature_count }}</dd>
+</dl>
+{% endcall %}
+{% call card('当前是否可分析') %}
+<p>目标配置: {% if coverage.goals.current_configured %}<span class="badge ok">已配置</span>{% else %}<span class="badge danger">缺失</span>{% endif %}</p>
+<p>最近报告: {% if coverage.reports.latest_report_id %}<a href="/reports/{{ coverage.reports.latest_report_id }}">查看</a>{% else %}无{% endif %}</p>
+{% endcall %}
+{{ layout_end() }}

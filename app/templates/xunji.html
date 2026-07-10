@@ -1,0 +1,90 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('data', '数据 / 训记', user) }}
+<div class="actions">
+  <a class="button secondary" href="/data/garmin">Garmin</a>
+  <a class="button secondary" href="/data/xunji">训记</a>
+  <a class="button secondary" href="/data/coverage">数据覆盖</a>
+  <a class="button secondary" href="/data/muscles">动作肌群</a>
+</div>
+{% call card('训记 Key') %}
+{% if key_configured %}
+  <p><span class="badge ok">已配置</span></p>
+{% else %}
+  <p><span class="badge danger">未配置</span> 请先到 <a href="/settings/credentials">凭证设置</a> 填入训记 Key。</p>
+{% endif %}
+{% endcall %}
+{% call card('同步') %}
+<p>上次同步: {{ state.last_successful_sync_at[:19] if state and state.last_successful_sync_at else '从未' }}</p>
+<p>已同步日期止: {{ state.last_synced_datestr if state else '-' }}</p>
+<div class="actions">
+  <button id="btn-incremental" class="button" onclick="startSync('incremental')" {{ 'disabled' if not key_configured else '' }}>增量同步</button>
+  <button id="btn-full" class="button secondary" onclick="startSync('full')" {{ 'disabled' if not key_configured else '' }}>全量同步(近60天)</button>
+</div>
+<div id="sync-progress" style="margin-top:14px; display:none">
+  <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden">
+    <div id="sync-bar" style="background:var(--primary); height:100%; width:0%; transition:width .3s"></div>
+  </div>
+  <p id="sync-text" class="muted small" style="margin-top:6px"></p>
+</div>
+<form method="post" action="/api/xunji/resync-day" class="form inline" style="margin-top:12px">
+  <label>指定日重拉<input name="datestr" type="date" required></label>
+  <button {{ 'disabled' if not key_configured else '' }}>重拉这一天</button>
+</form>
+<p class="muted small">同步为只读镜像, 不写回训记。首次全量因训记限频可能需要一两分钟。指定日重拉会覆盖本地该日数据。</p>
+<script>
+let pollTimer = null;
+async function startSync(mode) {
+  document.getElementById('btn-incremental').disabled = true;
+  document.getElementById('btn-full').disabled = true;
+  document.getElementById('sync-progress').style.display = 'block';
+  setText('正在启动同步…');
+  const fd = new FormData(); fd.append('mode', mode);
+  await fetch('/api/xunji/sync', {method:'POST', body:fd});
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 1200);
+  poll();
+}
+function setText(t){ document.getElementById('sync-text').textContent = t; }
+function setBar(pct){ document.getElementById('sync-bar').style.width = pct + '%'; }
+async function poll() {
+  let p;
+  try { p = await (await fetch('/api/xunji/progress')).json(); } catch(e){ return; }
+  if (p.state === 'running') {
+    const total = p.total_days || 0, done = p.days_done || 0;
+    const pct = total ? Math.round(done/total*100) : 5;
+    setBar(pct);
+    setText(`同步中… ${done}/${total} 天` + (p.current_date ? ` (当前 ${p.current_date})` : '') + `, 已入库训练 ${p.trainings||0} 条`);
+  } else if (p.state === 'done') {
+    clearInterval(pollTimer);
+    setBar(100);
+    setText(p.error ? ('部分完成, 中断于: ' + p.error) : `同步完成, 训练 ${p.trainings||0} 条。刷新查看。`);
+    setTimeout(()=>location.reload(), 1500);
+  } else if (p.state === 'error') {
+    clearInterval(pollTimer);
+    setText('同步失败: ' + (p.error||''));
+    document.getElementById('btn-incremental').disabled = false;
+    document.getElementById('btn-full').disabled = false;
+  }
+}
+// 页面加载时若已有同步在跑, 自动接续显示进度
+window.addEventListener('load', async () => {
+  try {
+    const p = await (await fetch('/api/xunji/progress')).json();
+    if (p.state === 'running') {
+      document.getElementById('sync-progress').style.display = 'block';
+      document.getElementById('btn-incremental').disabled = true;
+      document.getElementById('btn-full').disabled = true;
+      pollTimer = setInterval(poll, 1200); poll();
+    }
+  } catch(e){}
+});
+</script>
+{% endcall %}
+{% call card('本地镜像概览') %}
+<dl class="kv">
+  <dt>训练日</dt><dd>{{ days }}</dd>
+  <dt>动作条数</dt><dd>{{ movements }}</dd>
+  <dt>组数</dt><dd>{{ sets }}</dd>
+</dl>
+{% endcall %}
+{{ layout_end() }}

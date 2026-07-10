@@ -1,0 +1,71 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('home', '首页', user) }}
+
+<div class="cal-header">
+  <span class="cal-nav">
+    <a href="/?year={{ prev_y }}&month={{ prev_m }}" title="上一月">‹</a>
+    <a href="/?year={{ next_y }}&month={{ next_m }}" title="下一月">›</a>
+  </span>
+  <span class="cal-title">{{ year }} 年 {{ month }} 月</span>
+  <span class="cal-stats">&emsp;&emsp;🏋️ <strong>{{ cal.month_total_volume|round(0)|int }}</strong> kg &emsp; 🏃 <strong>{{ cal.month_total_distance|round(1) }}</strong> km · <strong>{{ cal.month_total_runs }}</strong> 次</span>
+  <a class="button secondary cal-today-link" href="/">回到本月</a>
+</div>
+<p class="muted small" style="margin:-4px 0 10px">
+  <span class="cal-vol" style="display:inline-block">0<span class="cal-unit">kg</span></span> 力量总容量(kg) ·
+  <span class="cal-run" style="display:inline-block">跑</span> 跑步场景+距离 ·
+  <span class="cal-tag" style="display:inline-block">肌群</span> 训练肌群
+</p>
+
+<div class="card" style="padding:12px">
+<table class="calendar">
+  <thead>
+    <tr>
+      {% for w in ['一','二','三','四','五','六','日'] %}<th>{{ w }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for week in weeks %}
+    <tr>
+      {% for cell in week %}
+      <td class="{{ 'out-month' if not cell.in_month else '' }} {{ 'is-today' if cell.iso == today_iso else '' }}">
+        <div class="cal-daynum">{{ cell.day }}</div>
+        {% if cell.data %}
+        <a class="cal-cell-link" href="/day/{{ cell.iso }}">
+          {% if cell.data.strength %}
+            <span class="cal-vol">{{ cell.data.strength.volume|round(0)|int }}<span class="cal-unit">kg</span></span>
+            {% for g in cell.data.strength.groups[:3] %}<span class="cal-tag">{{ g }}</span>{% endfor %}
+          {% endif %}
+          {% if cell.data.running %}
+            <span class="cal-run">{{ cell.data.running.variant_labels|join('/') if cell.data.running.variant_labels else '跑步' }} {{ cell.data.running.distance_km }}km{% if cell.data.running.type_labels %}<span class="cal-runtype"> {{ cell.data.running.type_labels|join('/') }}</span>{% endif %}</span>
+          {% endif %}
+        </a>
+        {% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="grid two">
+{% call card('当前目标') %}
+  {% if goal %}
+    <p><strong>{{ goal.primary_goal }}</strong> · v{{ goal.version_number }}</p>
+    <a class="button secondary" href="/goals/current">查看/编辑目标</a>
+  {% else %}
+    <p class="muted">尚未配置当前目标。</p>
+    <a class="button" href="/goals/current">配置目标</a>
+  {% endif %}
+{% endcall %}
+{% call card('最近分析') %}
+  {% if latest_report %}
+    <p class="muted small">{{ latest_report.covered_start_date }} ~ {{ latest_report.covered_end_date }}</p>
+    <a class="button" href="/reports/{{ latest_report.id }}">查看报告</a>
+  {% else %}
+    <p class="muted">还没有分析报告。</p>
+    <a class="button" href="/analysis/new">生成分析</a>
+  {% endif %}
+{% endcall %}
+</div>
+{{ layout_end() }}

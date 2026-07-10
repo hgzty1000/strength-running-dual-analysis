@@ -1,0 +1,38 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('home', detail.date ~ ' 运动详情', user) }}
+<a class="button secondary" href="/">← 返回日历</a>
+
+{% if not detail.strength and not detail.running %}
+<div class="card"><p class="muted">这一天没有训练记录。</p></div>
+{% endif %}
+
+{% for t in detail.strength %}
+{% call card('力量训练' ~ (' · ' ~ t.title if t.title else '')) %}
+<p class="muted small">总容量 {{ t.volume|round(0)|int }} kg{% if t.note %} · {{ t.note }}{% endif %}</p>
+{% for m in t.movements %}
+<div class="activity-card">
+  <div><strong>{{ m.action_name }}</strong> <span class="cal-tag" style="display:inline-block">{{ m.group }}</span> · {{ m.volume|round(0)|int }} kg</div>
+  <div class="muted small">
+    {% for s in m.sets %}{{ s.weight or '-' }}{{ s.weight_unit or 'kg' }}×{{ s.reps or '-' }}{% if s.rpe %} @{{ s.rpe }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% endcall %}
+{% endfor %}
+
+{% for r in detail.running %}
+{% call card('跑步 · ' ~ r.run_type_label ~ ' · ' ~ r.variant_label) %}
+<dl class="kv">
+  <dt>类型</dt><dd>{{ r.run_type_label }}</dd>
+  <dt>距离</dt><dd>{{ '%.2f'|format((r.distance_m or 0)/1000) }} km</dd>
+  <dt>Timer</dt><dd>{{ '%.0f'|format(r.timer_seconds or 0) }} s</dd>
+  <dt>平均心率</dt><dd>{{ r.avg_hr or '-' }}</dd>
+  <dt>平均步频</dt><dd>{{ r.avg_cadence or '-' }}</dd>
+  <dt>平均功率</dt><dd>{{ r.avg_power or '-' }}</dd>
+  <dt>气温来源</dt><dd>{{ r.temperature_source or 'missing' }}</dd>
+</dl>
+<a class="button secondary" href="/data/garmin/{{ r.id }}">查看完整活动</a>
+{% endcall %}
+{% endfor %}
+
+{{ layout_end() }}

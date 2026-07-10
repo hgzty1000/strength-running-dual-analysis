@@ -1,0 +1,69 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('data', '数据 / 动作肌群', user) }}
+<div class="actions">
+  <a class="button secondary" href="/data/garmin">Garmin</a>
+  <a class="button secondary" href="/data/xunji">训记</a>
+  <a class="button secondary" href="/data/coverage">数据覆盖</a>
+  <a class="button secondary" href="/data/muscles">动作肌群</a>
+</div>
+
+{% call card('未分类 / 待确认动作 (' ~ pending|length ~ ')') %}
+{% if pending %}
+<p class="muted small">训记未给肌群、且规则未能识别的动作。可用 AI 一次补全, 或手动指定。补全后固化复用。</p>
+<div class="actions" style="margin-bottom:12px">
+  <button id="ai-btn" onclick="aiClassify(this)" {{ '' if has_llm else 'disabled' }}>AI 一键补全</button>
+  {% if not has_llm %}<span class="muted small">需先在「设置→凭证」配置 LLM Key</span>{% endif %}
+  <span id="ai-result" class="test-result"></span>
+</div>
+{% for m in pending %}
+<div class="activity-card">
+  <div><strong>{{ m.source_action_name }}</strong> · 当前: {{ m.primary_group }} <span class="muted small">({{ m.source_type }}, 置信度 {{ m.confidence }})</span></div>
+  <form method="post" action="/api/muscles/correct" class="form inline" style="margin-top:6px">
+    <input type="hidden" name="action_name" value="{{ m.source_action_name }}">
+    <select name="primary_group">
+      {% for g in groups %}<option value="{{ g }}" {{ 'selected' if g==m.primary_group else '' }}>{{ g }}</option>{% endfor %}
+    </select>
+    <button class="secondary">手动订正</button>
+  </form>
+</div>
+{% endfor %}
+{% else %}
+<p class="muted">没有待确认的动作, 全部已分类。</p>
+{% endif %}
+{% endcall %}
+
+{% call card('全部映射 (' ~ mappings|length ~ ')') %}
+<table>
+  <thead><tr><th>动作</th><th>主要肌群</th><th>来源</th><th>置信度</th></tr></thead>
+  <tbody>
+  {% for m in mappings %}
+    <tr>
+      <td>{{ m.source_action_name }}</td>
+      <td>{{ m.primary_group }}</td>
+      <td>{{ m.source_type }}</td>
+      <td>{{ m.confidence }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endcall %}
+
+<script>
+async function aiClassify(btn) {
+  const span = document.getElementById('ai-result');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'AI 补全中…';
+  span.textContent = ''; span.className = 'test-result';
+  try {
+    const r = await fetch('/api/muscles/ai-classify', {method:'POST', headers:{'Accept':'application/json'}});
+    const d = await r.json();
+    span.textContent = d.message || '完成';
+    span.className = 'test-result ok';
+    setTimeout(()=>location.reload(), 1200);
+  } catch (e) {
+    span.textContent = '补全失败';
+    span.className = 'test-result danger';
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+</script>
+{{ layout_end() }}

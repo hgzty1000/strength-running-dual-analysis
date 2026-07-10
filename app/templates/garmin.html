@@ -1,0 +1,94 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('data', '数据 / Garmin', user) }}
+<div class="actions">
+  <a class="button secondary" href="/data/garmin">Garmin</a>
+  <a class="button secondary" href="/data/xunji">训记</a>
+  <a class="button secondary" href="/data/coverage">数据覆盖</a>
+  <a class="button secondary" href="/data/muscles">动作肌群</a>
+</div>
+{% call card('上传 Garmin ZIP') %}
+<form id="garmin-form" class="form">
+  <input id="garmin-files" type="file" name="files" accept=".zip" multiple required>
+  <button type="submit">上传并解析</button>
+</form>
+<p class="muted small">支持多选一次上传多个 Garmin zip。气温缺失不算失败, 重复文件自动跳过。</p>
+<div id="upload-progress" style="margin-top:12px; display:none">
+  <div style="background:var(--border); border-radius:8px; height:10px; overflow:hidden">
+    <div id="upload-bar" style="background:var(--primary); height:100%; width:0%; transition:width .3s"></div>
+  </div>
+  <p id="upload-text" class="muted small" style="margin-top:6px"></p>
+  <div id="upload-results" class="activity-list" style="margin-top:8px"></div>
+</div>
+<script>
+document.getElementById('garmin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('garmin-files');
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  const box = document.getElementById('upload-progress');
+  const bar = document.getElementById('upload-bar');
+  const text = document.getElementById('upload-text');
+  const list = document.getElementById('upload-results');
+  box.style.display = 'block'; list.innerHTML = '';
+  const btn = e.target.querySelector('button'); btn.disabled = true;
+  let imported = 0, dup = 0, failed = 0;
+  // 逐个上传, 实时进度 (每个文件单独一次请求, 复用同一后端)
+  for (let i = 0; i < files.length; i++) {
+    const fd = new FormData(); fd.append('files', files[i]);
+    text.textContent = `上传中… ${i+1}/${files.length} (${files[i].name})`;
+    try {
+      const resp = await fetch('/api/garmin/import', {method:'POST', headers:{'Accept':'application/json'}, body:fd});
+      const data = await resp.json();
+      const r = (data.results && data.results[0]) || {status:'failed', message:'无响应', name:files[i].name};
+      if (r.status === 'imported') imported++; else if (r.status === 'duplicate') dup++; else failed++;
+      const cls = r.status === 'imported' ? 'ok' : (r.status === 'duplicate' ? 'warn' : 'danger');
+      const row = document.createElement('div');
+      row.className = 'activity-card';
+      row.innerHTML = '<span class="badge ' + cls + '">' + r.status + '</span> ' + r.name + ' — ' + r.message;
+      list.appendChild(row);
+    } catch (err) {
+      failed++;
+      const row = document.createElement('div'); row.className='activity-card';
+      row.innerHTML = '<span class="badge danger">failed</span> ' + files[i].name + ' — 请求失败';
+      list.appendChild(row);
+    }
+    bar.style.width = Math.round((i+1)/files.length*100) + '%';
+  }
+  text.textContent = `完成: 导入 ${imported}, 重复 ${dup}, 失败 ${failed}。即将刷新列表…`;
+  btn.disabled = false;
+  setTimeout(()=>location.reload(), 1800);
+});
+</script>
+{% endcall %}
+{% call card('活动列表') %}
+  {% if activities %}
+  <div class="actions" style="margin-bottom:10px">
+    <button onclick="reclassify(this)">重新分类跑步类型</button>
+    <span id="reclass-result" class="test-result"></span>
+  </div>
+  <div class="activity-list">
+  {% for a in activities %}
+    <a class="activity-card" href="/data/garmin/{{ a.id }}">
+      <div><strong>{{ a.local_date or a.fit_start_time[:10] }}</strong> · <span class="badge ok">{{ a.run_type_label }}</span> · {{ a.variant_label }}</div>
+      <div>{{ '%.2f'|format((a.distance_m or 0)/1000) }} km · {{ '%.0f'|format(a.timer_seconds or 0) }} s · HR {{ a.avg_hr or '-' }} · Power {{ a.avg_power or '-' }}</div>
+      <div class="muted small">气温: {{ a.temperature_source or 'missing' }}</div>
+    </a>
+  {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">尚未导入 Garmin 活动。</p>
+  {% endif %}
+{% endcall %}
+<script>
+async function reclassify(btn){
+  const span=document.getElementById('reclass-result');
+  btn.disabled=true; const o=btn.textContent; btn.textContent='分类中…';
+  try{
+    const r=await fetch('/api/garmin/reclassify',{method:'POST',headers:{'Accept':'application/json'}});
+    const d=await r.json();
+    span.textContent='已分类 '+d.classified+' 条'; span.className='test-result ok';
+    setTimeout(()=>location.reload(),1000);
+  }catch(e){ span.textContent='失败'; span.className='test-result danger'; btn.disabled=false; btn.textContent=o; }
+}
+</script>
+{{ layout_end() }}

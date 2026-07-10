@@ -1,0 +1,13 @@
+{% from 'base.html' import layout_start, layout_end %}
+{{ layout_start('login', '登录', None) }}
+<section class="auth-card">
+  <h1>力跑双训分析系统</h1>
+  <p class="muted">力量 + 跑步双线训练分析</p>
+  <form method="post" action="/api/auth/login" class="form">
+    <label>用户名<input name="username" value="owner" required></label>
+    <label>密码<input name="password" type="password" required></label>
+    <button type="submit">登录</button>
+  </form>
+  <p class="muted small">demo 阶段不开放注册。</p>
+</section>
+{{ layout_end() }}

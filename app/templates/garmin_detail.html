@@ -1,0 +1,24 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('data', 'Garmin 活动详情', user) }}
+{% call card('活动摘要') %}
+<dl class="kv">
+  <dt>开始时间</dt><dd>{{ activity.fit_start_time }}</dd>
+  <dt>类型</dt><dd>{{ family_label(activity.activity_family) }} · {{ variant_label(activity.activity_variant) }}</dd>
+  <dt>距离</dt><dd>{{ '%.2f'|format((activity.distance_m or 0)/1000) }} km</dd>
+  <dt>Timer</dt><dd>{{ '%.0f'|format(activity.timer_seconds or 0) }} s</dd>
+  <dt>Elapsed</dt><dd>{{ '%.0f'|format(activity.elapsed_seconds or 0) }} s</dd>
+  <dt>平均心率</dt><dd>{{ activity.avg_hr or '-' }}</dd>
+  <dt>平均步频</dt><dd>{{ activity.avg_cadence or '-' }}</dd>
+  <dt>平均功率</dt><dd>{{ activity.avg_power or '-' }}</dd>
+  <dt>气温来源</dt><dd>{{ activity.temperature_source or 'missing' }}</dd>
+</dl>
+{% endcall %}
+{% call card('Laps') %}
+<div class="activity-list">
+{% for lap in activity.laps %}
+  <div class="activity-card"><strong>Lap {{ lap.lap_index + 1 }}</strong> · {{ '%.0f'|format(lap.distance_m or 0) }} m · {{ '%.0f'|format(lap.timer_seconds or 0) }} s · HR {{ lap.avg_hr or '-' }}</div>
+{% endfor %}
+</div>
+{% endcall %}
+<a class="button secondary" href="/data/garmin">返回</a>
+{{ layout_end() }}

@@ -1,0 +1,6 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('reports', '报告', user) }}
+{% call card('历史报告') %}
+{% for r in reports %}<a class="activity-card" href="/reports/{{ r.id }}"><strong>{{ r.created_at[:19] }}</strong> · {{ r.covered_start_date }}~{{ r.covered_end_date }} · {{ r.primary_goal }}</a>{% else %}<p class="muted">暂无报告。</p>{% endfor %}
+{% endcall %}
+{{ layout_end() }}
