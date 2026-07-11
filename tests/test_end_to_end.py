@@ -86,6 +86,8 @@ def run() -> bool:
     r = client.get("/settings/credentials")
     check("xunji key masked not full", "xjllm_testsecret1234567890" not in r.text and "xjllm_" in r.text,
           "full key leaked" if "xjllm_testsecret1234567890" in r.text else "")
+    # 6b. 凭证页口径: 能解密的凭证标记「可用」(与 has_llm 一致)
+    check("credential shows usable badge", "可用" in r.text, "no usable badge on credentials page")
 
     # 7. 上传真实 Garmin 样本
     imported = 0
@@ -133,6 +135,53 @@ def run() -> bool:
         tset = {t["run_type"] for t in types}
     check("run types assigned (not all unknown)", tset and tset != {"mixed_unknown"}, f"types={tset}")
 
+    # 7d. 手工标注气温 (数据源无温度时的补充路径)
+    with db() as conn:
+        road = conn.execute(
+            "SELECT id FROM garmin_activities WHERE activity_variant='road_run' LIMIT 1"
+        ).fetchone()
+        tread = conn.execute(
+            "SELECT id FROM garmin_activities WHERE activity_variant='treadmill_run' LIMIT 1"
+        ).fetchone()
+    road_id = road["id"] if road else None
+    check("has road-run activity for temp test", bool(road_id), "no road_run activity")
+    if road_id:
+        # 详情页含手工标注表单
+        r = client.get(f"/data/garmin/{road_id}")
+        check("activity detail has temp form", r.status_code == 200 and "手工标注气温" in r.text,
+              f"status={r.status_code}")
+        # 设温 → 落库 manual + 值
+        r = client.post(f"/api/garmin/{road_id}/temperature", data={"temperature_c": "28.5"},
+                        follow_redirects=False)
+        check("set temperature redirects", r.status_code == 303, f"status={r.status_code}")
+        with db() as conn:
+            m = conn.execute("SELECT temperature_c, temperature_source FROM running_activity_metrics WHERE activity_id=?",
+                             (road_id,)).fetchone()
+        check("temperature saved as manual", m and abs((m["temperature_c"] or 0) - 28.5) < 0.01 and m["temperature_source"] == "manual",
+              f"m={dict(m) if m else None}")
+        # 越界拒绝
+        r = client.post(f"/api/garmin/{road_id}/temperature", data={"temperature_c": "999"},
+                        follow_redirects=False)
+        check("temperature out-of-range rejected", r.status_code == 400, f"status={r.status_code}")
+        # 非数字拒绝
+        r = client.post(f"/api/garmin/{road_id}/temperature", data={"temperature_c": "abc"},
+                        follow_redirects=False)
+        check("temperature non-numeric rejected", r.status_code == 400, f"status={r.status_code}")
+        # 清空 → 回 missing
+        r = client.post(f"/api/garmin/{road_id}/temperature", data={"temperature_c": ""},
+                        follow_redirects=False)
+        check("clear temperature redirects", r.status_code == 303, f"status={r.status_code}")
+        with db() as conn:
+            m = conn.execute("SELECT temperature_c, temperature_source FROM running_activity_metrics WHERE activity_id=?",
+                             (road_id,)).fetchone()
+        check("temperature cleared to missing", m and m["temperature_c"] is None and m["temperature_source"] == "missing",
+              f"m={dict(m) if m else None}")
+    if tread:
+        # 跑步机详情页注明不参与热解读
+        r = client.get(f"/data/garmin/{tread['id']}")
+        check("treadmill detail notes indoor exclusion", r.status_code == 200 and "室内跑" in r.text,
+              f"status={r.status_code}")
+
     # 8. 重复上传去重 (以当前实际条数为基准, 再传一次已存在文件, 应不增加)
     with db() as conn:
         before = conn.execute("SELECT count(*) c FROM garmin_activities").fetchone()["c"]
@@ -166,6 +215,64 @@ def run() -> bool:
     }, follow_redirects=False)
     check("save goal", r.status_code == 303)
 
+    # 10b. AI 目标澄清 (测试环境无 LLM → 验证优雅降级 + 落库标记)
+    r = client.get("/goals/clarify")
+    check("goal clarify page renders", r.status_code == 200 and "AI 目标澄清" in r.text, f"status={r.status_code}")
+    # 无 LLM Key: 页面应给出配置引导, 而非报错
+    check("clarify page shows no-llm notice", "尚未配置 LLM Key" in r.text or "未配置 LLM" in r.text, "no notice")
+    # message 端点无 LLM 时应返回结构化提示 (200 + ok:false)
+    r = client.post("/api/goals/clarify/message", json={"messages": [{"role": "user", "content": "想跑半马"}]})
+    j = r.json() if r.status_code == 200 else {}
+    check("clarify message degrades gracefully", r.status_code == 200 and j.get("ok") is False and "message" in j,
+          f"status={r.status_code} j={j}")
+    # draft 端点同样优雅降级
+    r = client.post("/api/goals/clarify/draft", json={"messages": [{"role": "user", "content": "想跑半马"}]})
+    j = r.json() if r.status_code == 200 else {}
+    check("clarify draft degrades gracefully", r.status_code == 200 and j.get("ok") is False,
+          f"status={r.status_code} j={j}")
+    # message 端点缺用户消息 → 400
+    r = client.post("/api/goals/clarify/message", json={"messages": []})
+    check("clarify message rejects empty", r.status_code == 400, f"status={r.status_code}")
+    # 经 AI 澄清确认的目标: created_by 应标记 ai_clarification, 且成为当前版本
+    r = client.post("/api/goals", data={
+        "primary_goal": "balanced",
+        "running_goal_text": "秋季半马 sub-1:50",
+        "strength_baseline_text": "深蹲不掉太多",
+        "conflict_policy_text": "比赛周减力量",
+        "uncertainties_text": "",
+        "effective_from": "2026-07-01",
+        "created_by": "ai_clarification",
+    }, follow_redirects=False)
+    check("save ai-clarified goal", r.status_code == 303)
+    with db() as conn:
+        g = conn.execute("SELECT created_by, is_current, primary_goal FROM goal_config_versions WHERE user_id=(SELECT id FROM users WHERE username='owner') ORDER BY version_number DESC LIMIT 1").fetchone()
+    check("ai goal marked created_by", g and g["created_by"] == "ai_clarification" and g["is_current"] == 1,
+          f"g={dict(g) if g else None}")
+    # created_by 白名单: 非法值应被归为 manual
+    r = client.post("/api/goals", data={"primary_goal": "custom", "created_by": "hacker"}, follow_redirects=False)
+    with db() as conn:
+        g = conn.execute("SELECT created_by FROM goal_config_versions WHERE user_id=(SELECT id FROM users WHERE username='owner') ORDER BY version_number DESC LIMIT 1").fetchone()
+    check("created_by whitelist enforced", g and g["created_by"] == "manual", f"g={dict(g) if g else None}")
+    # 复位当前目标为跑步比赛优先 (后续报告测试依赖), created_by 默认 manual
+    r = client.post("/api/goals", data={
+        "primary_goal": "running_race_priority",
+        "running_goal_text": "备战全马, 目标 3:45",
+        "strength_baseline_text": "保持体型和肌肉量",
+        "conflict_policy_text": "关键跑课优先于腿训加量",
+        "uncertainties_text": "比赛日待定",
+        "effective_from": "2026-06-01",
+    }, follow_redirects=False)
+    check("restore manual goal", r.status_code == 303)
+
+    # 10c. 历史目标查看: 可展开列表 + 完整字段 + 复用按钮 + 中文标签
+    r = client.get("/goals/current")
+    check("goal history expandable", r.status_code == 200 and "goal-version" in r.text and "以此版本填入当前目标" in r.text,
+          f"status={r.status_code}")
+    check("goal history shows full fields", "力量底线" in r.text and "冲突取舍" in r.text, "detail fields missing")
+    # 历史区主目标应经 goal_label 显示中文 (summary 含 gv-head + 中文标签)
+    check("goal label localized in history", "gv-head" in r.text and "跑步比赛/成绩优先" in r.text,
+          "primary_goal not localized in history")
+
     # 11. 休整标注
     r = client.post("/api/rest-notes", data={
         "start_date": "2026-06-24", "end_date": "2026-06-26", "affected_scope": "legs",
@@ -197,6 +304,80 @@ def run() -> bool:
     # 14. 报告详情页可渲染
     r = client.get(report_loc)
     check("report detail renders", r.status_code == 200 and "核心结论" in r.text, f"status={r.status_code}")
+    # 14b. 叙述层经 markdown 渲染 (md-body 容器)
+    check("report narrative uses md renderer", "md-body" in r.text, "no md-body container")
+
+    # 14c. 轻量 markdown 渲染器: 基础语法 + XSS 转义
+    from app.markdown_lite import render as _md
+    check("md bold", "<strong>过量</strong>" in _md("这周**过量**了"))
+    check("md heading", "<h5>小结</h5>" in _md("## 小结"))
+    check("md list", _md("- a\n- b") == "<ul><li>a</li><li>b</li></ul>")
+    check("md ordered list", _md("1. 先减量\n2. 再观察") == "<ol><li>先减量</li><li>再观察</li></ol>")
+    check("md inline code", "<code>RPE</code>" in _md("用 `RPE` 衡量"))
+    _x = _md("<script>alert(1)</script>")
+    check("md escapes script", "<script>" not in _x and "&lt;script&gt;" in _x, f"out={_x}")
+    _x2 = _md("<img src=x onerror=alert(1)>")
+    check("md escapes html attrs", "<img" not in _x2 and "onerror=alert" in _x2 and "&lt;img" in _x2, f"out={_x2}")
+    _x3 = _md("[点我](javascript:alert(1))")
+    check("md no link injection", "<a " not in _x3 and "javascript:" in _x3, f"out={_x3}")
+    check("md empty safe", _md("") == "" and _md(None) == "")
+
+    # 14d. 热负荷—心率解读 (合成数据单测纯函数, 确定性)
+    from app.services.analysis import _heat_band, _heat_summary
+    check("heat band normal", _heat_band(20.0) == "normal")
+    check("heat band warm", _heat_band(27.0) == "warm")
+    check("heat band hot", _heat_band(32.0) == "hot")
+    check("heat band none", _heat_band(None) is None)
+    # 合成: 2 次凉爽户外 (心率 150), 2 次高温户外 (心率 165), 1 次室内高温 (不计)
+    synth = [
+        {"indoor": False, "temperature_c": 18.0, "avg_hr": 150},
+        {"indoor": False, "temperature_c": 20.0, "avg_hr": 150},
+        {"indoor": False, "temperature_c": 31.0, "avg_hr": 165},
+        {"indoor": False, "temperature_c": 33.0, "avg_hr": 165},
+        {"indoor": True, "temperature_c": 30.0, "avg_hr": 170},
+    ]
+    hs = _heat_summary(synth)
+    check("heat excludes indoor", hs["outdoor_with_temp_count"] == 4, f"count={hs['outdoor_with_temp_count']}")
+    check("heat hot count", hs["hot_run_count"] == 2, f"hot={hs['hot_run_count']}")
+    check("heat hr delta positive", hs["hot_vs_outdoor_hr_delta"] is not None and hs["hot_vs_outdoor_hr_delta"] > 0,
+          f"delta={hs['hot_vs_outdoor_hr_delta']}")
+    check("heat band count", hs["band_count"]["hot"] == 2 and hs["band_count"]["normal"] == 2,
+          f"bands={hs['band_count']}")
+    # 全室内: 不产生热解读样本
+    hs_indoor = _heat_summary([{"indoor": True, "temperature_c": 28.0, "avg_hr": 160}])
+    check("heat all-indoor empty", hs_indoor["outdoor_with_temp_count"] == 0 and hs_indoor["hot_run_count"] == 0,
+          f"hs={hs_indoor}")
+    # 报告 structured 带 heat 段
+    check("report load_summary has heat", "heat" in structured.get("load_summary", {}),
+          f"keys={list(structured.get('load_summary',{}).keys())}")
+
+    # 14d. 报告浅追问
+    report_id = report_loc.rsplit("/", 1)[-1]
+    # 报告详情页应含追问区; 无 LLM 时给引导, 不报错
+    check("report has followup section", "就本报告追问" in r.text, "no followup section")
+    check("followup shows no-llm notice", "无法追问" in r.text, "no no-llm notice on followup")
+    # 追问端点无 LLM 时优雅降级 (200 + ok:false), 且不落库
+    r2 = client.post(f"/api/reports/{report_id}/followup", json={"question": "为什么说力量偏多?"})
+    j2 = r2.json() if r2.status_code == 200 else {}
+    check("followup degrades gracefully", r2.status_code == 200 and j2.get("ok") is False, f"status={r2.status_code} j={j2}")
+    with db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='owner'").fetchone()["id"]
+        fu_after = conn.execute("SELECT count(*) c FROM report_followups WHERE report_id=?", (report_id,)).fetchone()["c"]
+    check("followup not persisted without llm", fu_after == 0, f"count={fu_after}")
+    # 追问端点缺问题 → 400
+    r2 = client.post(f"/api/reports/{report_id}/followup", json={"question": "  "})
+    check("followup rejects empty question", r2.status_code == 400, f"status={r2.status_code}")
+    # 追问不存在的报告 → 404
+    r2 = client.post("/api/reports/nonexistent/followup", json={"question": "x"})
+    check("followup 404 on missing report", r2.status_code == 404, f"status={r2.status_code}")
+    # 直接用 repo 助手验证落库 + 列表 + 详情页渲染 (含 markdown)
+    from app.repositories import add_report_followup, list_report_followups
+    add_report_followup(uid, report_id, "为什么力量偏多?", "因为**推**类容量集中。\n- 建议均衡")
+    fus = list_report_followups(uid, report_id)
+    check("followup persisted via repo", len(fus) == 1 and fus[0]["question"] == "为什么力量偏多?", f"fus={fus}")
+    r3 = client.get(report_loc)
+    check("followup renders in report page", "为什么力量偏多?" in r3.text and "<strong>推</strong>" in r3.text,
+          "stored followup not rendered")
 
     # 15. 重新分析生成新报告, 旧报告保留
     report_id = report_loc.rsplit("/", 1)[-1]
@@ -221,6 +402,50 @@ def run() -> bool:
     check("calendar month nav renders", r.status_code == 200 and "2026 年 6 月" in r.text, f"status={r.status_code}")
     # 力量数据在 6 月, 日历该月应含肌群标签与容量
     check("calendar shows strength cell", ("cal-vol" in r.text), "no strength cell in June")
+
+    # 16b1. 首页数据看板 (日/周/月三档 + 趋势/肌群/跑步类型) — 聚合函数 + 渲染
+    from app.repositories import dashboard_stats
+    with db() as conn:
+        _owner_id = conn.execute("SELECT id FROM users WHERE username='owner'").fetchone()["id"]
+    dash = dashboard_stats(_owner_id, 12)
+    check("dashboard has three periods", set(dash["periods"].keys()) == {"day", "week", "month"},
+          f"periods={list(dash['periods'].keys())}")
+    check("dashboard default is week", dash["default"] == "week", f"default={dash['default']}")
+    check("dashboard each period has 12 buckets",
+          all(len(dash["periods"][g]["buckets"]) == 12 for g in ("day", "week", "month")),
+          f"lens={ {g: len(dash['periods'][g]['buckets']) for g in ('day','week','month')} }")
+    wk = dash["periods"]["week"]
+    check("dashboard period keys present",
+          all(k in wk for k in ("buckets", "muscle_groups", "run_types", "totals")),
+          f"keys={list(wk.keys())}")
+    check("dashboard week totals reconcile",
+          round(sum(b["strength_volume_kg"] for b in wk["buckets"]), 1) == wk["totals"]["strength_volume_kg"],
+          "week strength sum != totals")
+    check("dashboard muscle groups sorted desc",
+          all(wk["muscle_groups"][i]["volume_kg"] >= wk["muscle_groups"][i + 1]["volume_kg"]
+              for i in range(len(wk["muscle_groups"]) - 1) if wk["muscle_groups"][i]["group"] != "未分类"),
+          f"groups={[g['group'] for g in wk['muscle_groups']]}")
+    check("dashboard unclassified last",
+          not wk["muscle_groups"] or wk["muscle_groups"][-1]["group"] == "未分类"
+          or all(g["group"] != "未分类" for g in wk["muscle_groups"]),
+          f"groups={[g['group'] for g in wk['muscle_groups']]}")
+    check("dashboard run_types structured",
+          all(set(rt.keys()) >= {"type", "label", "count"} for rt in wk["run_types"]),
+          f"run_types={wk['run_types']}")
+    check("dashboard run_types sorted desc",
+          all(wk["run_types"][i]["count"] >= wk["run_types"][i + 1]["count"]
+              for i in range(len(wk["run_types"]) - 1)),
+          f"run_types={[(t['label'], t['count']) for t in wk['run_types']]}")
+    check("dashboard run_type count reconciles run_count",
+          sum(rt["count"] for rt in wk["run_types"]) == wk["totals"]["run_count"],
+          f"sum={sum(rt['count'] for rt in wk['run_types'])} run_count={wk['totals']['run_count']}")
+    check("dashboard has_data flag", dash["has_data"] is True, f"has_data={dash['has_data']}")
+    # 首页应渲染看板结构 (近期有数据时): 粒度切换 + 内嵌数据 + 饼图容器
+    r = client.get("/")
+    check("home renders dashboard", r.status_code == 200 and "训练概览" in r.text
+          and 'id="dashboard-data"' in r.text and 'data-gran="month"' in r.text
+          and 'id="chart-runtype"' in r.text,
+          f"status={r.status_code}")
 
     # 16b2. 动作肌群管理页 + 手动订正
     r = client.get("/data/muscles")

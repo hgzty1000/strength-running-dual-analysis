@@ -1,71 +1,130 @@
 {% from 'base.html' import layout_start, layout_end, card %}
 {{ layout_start('home', '首页', user) }}
 
+{% if dash.has_data %}
+<div class="dashboard" id="dashboard" data-default="{{ dash.default }}">
+  <div class="dash-head">
+    <h2>训练概览</h2>
+    <div class="dash-gran" role="tablist" aria-label="统计粒度">
+      <button type="button" class="gran-btn" data-gran="day">日</button>
+      <button type="button" class="gran-btn" data-gran="week">周</button>
+      <button type="button" class="gran-btn" data-gran="month">月</button>
+    </div>
+    <span class="muted small dash-totals" id="dash-totals"></span>
+  </div>
+  <div class="dash-grid">
+
+    <div class="chart-card">
+      <div class="chart-title">力量容量趋势 <span class="muted small" id="chart-unit-strength"></span></div>
+      <div class="chart-bars" id="chart-strength" role="img" aria-label="力量容量趋势柱状图"></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">跑量趋势 <span class="muted small" id="chart-unit-running"></span></div>
+      <div class="chart-bars" id="chart-running" role="img" aria-label="跑量趋势柱状图"></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">肌群容量分布 <span class="muted small" id="chart-unit-muscle"></span></div>
+      <div class="hbars" id="chart-muscle"></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">跑步类型分布 <span class="muted small" id="chart-unit-runtype"></span></div>
+      <div class="pie-wrap" id="chart-runtype"></div>
+    </div>
+
+  </div>
+</div>
+<script type="application/json" id="dashboard-data">{{ dash.periods | tojson }}</script>
+<script src="/static/js/dashboard.js"></script>
+{% endif %}
+
 <div class="cal-header">
   <span class="cal-nav">
     <a href="/?year={{ prev_y }}&month={{ prev_m }}" title="上一月">‹</a>
     <a href="/?year={{ next_y }}&month={{ next_m }}" title="下一月">›</a>
   </span>
   <span class="cal-title">{{ year }} 年 {{ month }} 月</span>
-  <span class="cal-stats">&emsp;&emsp;🏋️ <strong>{{ cal.month_total_volume|round(0)|int }}</strong> kg &emsp; 🏃 <strong>{{ cal.month_total_distance|round(1) }}</strong> km · <strong>{{ cal.month_total_runs }}</strong> 次</span>
+  <span class="cal-stats">&emsp;🏋️ <strong>{{ cal.month_total_volume|round(0)|int }}</strong> kg &emsp; 🏃 <strong>{{ cal.month_total_distance|round(1) }}</strong> km · <strong>{{ cal.month_total_runs }}</strong> 次</span>
   <a class="button secondary cal-today-link" href="/">回到本月</a>
 </div>
-<p class="muted small" style="margin:-4px 0 10px">
-  <span class="cal-vol" style="display:inline-block">0<span class="cal-unit">kg</span></span> 力量总容量(kg) ·
-  <span class="cal-run" style="display:inline-block">跑</span> 跑步场景+距离 ·
-  <span class="cal-tag" style="display:inline-block">肌群</span> 训练肌群
-</p>
 
-<div class="card" style="padding:12px">
-<table class="calendar">
-  <thead>
-    <tr>
-      {% for w in ['一','二','三','四','五','六','日'] %}<th>{{ w }}</th>{% endfor %}
-    </tr>
-  </thead>
-  <tbody>
-    {% for week in weeks %}
-    <tr>
-      {% for cell in week %}
-      <td class="{{ 'out-month' if not cell.in_month else '' }} {{ 'is-today' if cell.iso == today_iso else '' }}">
-        <div class="cal-daynum">{{ cell.day }}</div>
-        {% if cell.data %}
-        <a class="cal-cell-link" href="/day/{{ cell.iso }}">
-          {% if cell.data.strength %}
-            <span class="cal-vol">{{ cell.data.strength.volume|round(0)|int }}<span class="cal-unit">kg</span></span>
-            {% for g in cell.data.strength.groups[:3] %}<span class="cal-tag">{{ g }}</span>{% endfor %}
-          {% endif %}
-          {% if cell.data.running %}
-            <span class="cal-run">{{ cell.data.running.variant_labels|join('/') if cell.data.running.variant_labels else '跑步' }} {{ cell.data.running.distance_km }}km{% if cell.data.running.type_labels %}<span class="cal-runtype"> {{ cell.data.running.type_labels|join('/') }}</span>{% endif %}</span>
-          {% endif %}
-        </a>
-        {% endif %}
-      </td>
-      {% endfor %}
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="cal-legend">
+  <span class="lg"><span class="sw strength"></span>力量</span>
+  <span class="lg"><span class="sw run"></span>跑步</span>
+  <span class="lg"><span class="sw both"></span>力量+跑步</span>
+  <span class="lg"><span class="cal-vol" style="display:inline-block;margin:0">0<span class="cal-unit">kg</span></span>力量容量</span>
+  <span class="lg"><span class="cal-tag" style="margin:0">肌群</span>训练肌群</span>
 </div>
 
-<div class="grid two">
-{% call card('当前目标') %}
-  {% if goal %}
-    <p><strong>{{ goal.primary_goal }}</strong> · v{{ goal.version_number }}</p>
-    <a class="button secondary" href="/goals/current">查看/编辑目标</a>
-  {% else %}
-    <p class="muted">尚未配置当前目标。</p>
-    <a class="button" href="/goals/current">配置目标</a>
-  {% endif %}
-{% endcall %}
-{% call card('最近分析') %}
-  {% if latest_report %}
-    <p class="muted small">{{ latest_report.covered_start_date }} ~ {{ latest_report.covered_end_date }}</p>
-    <a class="button" href="/reports/{{ latest_report.id }}">查看报告</a>
-  {% else %}
-    <p class="muted">还没有分析报告。</p>
-    <a class="button" href="/analysis/new">生成分析</a>
-  {% endif %}
-{% endcall %}
+<div class="home-grid">
+  <div class="card" style="padding:12px">
+  <table class="calendar">
+    <thead>
+      <tr>
+        {% for w in ['一','二','三','四','五','六','日'] %}<th>{{ w }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in weeks %}
+      <tr>
+        {% for cell in week %}
+        {% set has_s = cell.data and cell.data.strength %}
+        {% set has_r = cell.data and cell.data.running %}
+        <td class="{{ 'out-month' if not cell.in_month else '' }} {{ 'is-today' if cell.iso == today_iso else '' }} {% if cell.in_month %}{% if has_s and has_r %}has-both{% elif has_s %}has-strength{% elif has_r %}has-run{% endif %}{% endif %}">
+          <div class="cal-daynum">{{ cell.day }}</div>
+          {% if cell.data %}
+          <a class="cal-cell-link" href="/day/{{ cell.iso }}">
+            {% if cell.data.strength %}
+              <span class="cal-vol">{{ cell.data.strength.volume|round(0)|int }}<span class="cal-unit">kg</span></span>
+              {% for g in cell.data.strength.groups[:3] %}<span class="cal-tag">{{ g }}</span>{% endfor %}
+            {% endif %}
+            {% if cell.data.running %}
+              <span class="cal-run">{{ cell.data.running.variant_labels|join('/') if cell.data.running.variant_labels else '跑步' }} {{ cell.data.running.distance_km }}km{% if cell.data.running.type_labels %}<span class="cal-runtype"> {{ cell.data.running.type_labels|join('/') }}</span>{% endif %}</span>
+            {% endif %}
+          </a>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <div class="home-side">
+    <div class="accent-card goal">
+      <span class="ac-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>
+      </span>
+      <div class="ac-body">
+        <p class="ac-label">当前目标</p>
+        {% if goal %}
+          <p class="ac-value">{{ goal.primary_goal }} <span style="font-weight:400;opacity:.85">· v{{ goal.version_number }}</span></p>
+          <a class="button" href="/goals/current">查看 / 编辑</a>
+        {% else %}
+          <p class="ac-value small">尚未配置目标</p>
+          <a class="button" href="/goals/current">去配置</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="accent-card report">
+      <span class="ac-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4"/><path d="M4 20h16"/><path d="m7 15 3-4 3 2 4-6"/></svg>
+      </span>
+      <div class="ac-body">
+        <p class="ac-label">最近分析</p>
+        {% if latest_report %}
+          <p class="ac-value small">{{ latest_report.covered_start_date }} ~ {{ latest_report.covered_end_date }}</p>
+          <a class="button" href="/reports/{{ latest_report.id }}">查看报告</a>
+        {% else %}
+          <p class="ac-value small">还没有分析报告</p>
+          <a class="button" href="/analysis/new">生成分析</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
 {{ layout_end() }}

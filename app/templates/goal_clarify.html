@@ -1,0 +1,52 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('goals', 'AI 目标澄清', user) }}
+
+{% if not has_llm %}
+<div class="card">
+  <p class="alert">尚未配置 LLM Key,无法进行 AI 澄清对话。</p>
+  <p class="muted small">请先到「设置 → 凭证」填写 LLM Key。你也可以直接<a href="/goals/current">手动填写目标</a>。</p>
+  <a class="button" href="/settings/credentials">去配置</a>
+</div>
+{% else %}
+<p class="muted small" style="margin-top:-8px">
+  和 AI 聊聊你的训练意图,聊清后点「汇成目标草案」生成待确认的配置。
+  对话不会被保存,只有你确认的目标版本才会入库。 · <a href="/goals/current">返回目标</a>
+</p>
+
+<div class="clarify-wrap">
+  <div class="card clarify-chat-card">
+    <div id="chat" class="chat-scroll"></div>
+    <form id="chat-form" class="chat-input">
+      <textarea id="chat-text" rows="2" placeholder="说说你的训练目标,比如:想秋天跑个半马,又不想掉太多力量…"></textarea>
+      <div class="chat-actions">
+        <button type="submit" id="send-btn">发送</button>
+        <button type="button" id="draft-btn" class="secondary">汇成目标草案</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card clarify-draft-card" id="draft-card" style="display:none">
+    <h2>目标草案(可编辑后确认)</h2>
+    <p class="muted small">AI 是助手,不是权威。任意字段都可以改,确认后保存为新版本。</p>
+    <div id="rest-hint" class="flash" style="display:none;background:#fdf3e3;color:var(--warn)"></div>
+    <form method="post" action="/api/goals" class="form">
+      <input type="hidden" name="created_by" value="ai_clarification">
+      <label>主目标
+        <select name="primary_goal" id="d-primary" required>
+          {% for v,t in [('balanced','双线平衡'),('running_race_priority','跑步比赛/成绩优先'),('strength_physique_priority','力量/体型优先'),('recovery_priority','恢复优先'),('fat_loss_priority','减脂/体重控制优先'),('custom','自定义')] %}
+          <option value="{{v}}">{{t}}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>跑步目标说明<textarea name="running_goal_text" id="d-running"></textarea></label>
+      <label>力量底线说明<textarea name="strength_baseline_text" id="d-strength"></textarea></label>
+      <label>冲突取舍说明<textarea name="conflict_policy_text" id="d-conflict"></textarea></label>
+      <label>不确定项<textarea name="uncertainties_text" id="d-uncertain"></textarea></label>
+      <label>生效日期<input name="effective_from" type="date" id="d-effective"></label>
+      <button type="submit">确认并保存为新版本</button>
+    </form>
+  </div>
+</div>
+<script src="/static/js/goal_clarify.js" defer></script>
+{% endif %}
+{{ layout_end() }}

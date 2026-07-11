@@ -26,6 +26,10 @@
 {% if structured.load_summary.running_variants %}
 <p class="muted small">跑步场景: {% for k,v in structured.load_summary.running_variants.items() %}{{ variant_label(k) }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
 {% endif %}
+{% set heat = structured.load_summary.heat %}
+{% if heat and heat.outdoor_with_temp_count %}
+<p class="muted small">高温跑步: {{ heat.hot_run_count }} 次{% if heat.hot_avg_temp_c %} (均温 {{ heat.hot_avg_temp_c }}°C){% endif %}{% if heat.hot_vs_outdoor_hr_delta is not none %} · 高温跑均心率较其他户外跑 {{ '+' if heat.hot_vs_outdoor_hr_delta >= 0 else '' }}{{ heat.hot_vs_outdoor_hr_delta }} bpm{% endif %} · 户外有温样本 {{ heat.outdoor_with_temp_count }}</p>
+{% endif %}
 {% endcall %}
 {% call card('双线冲突') %}<ul>{% for c in structured.double_line_conflicts %}<li>{{ c }}</li>{% endfor %}</ul>{% endcall %}
 {% call card('风险') %}<ul>{% for r in structured.risks %}<li>{{ r }}</li>{% endfor %}</ul>{% endcall %}
@@ -33,7 +37,29 @@
 {% if structured.uncertainties %}
 {% call card('不确定项') %}<ul>{% for u in structured.uncertainties %}<li>{{ u }}</li>{% endfor %}</ul>{% endcall %}
 {% endif %}
-{% call card('叙述层') %}<div style="white-space:pre-wrap">{{ report.narrative_md }}</div>{% endcall %}
+{% call card('叙述层') %}<div class="md-body">{{ render_markdown(report.narrative_md)|safe }}</div>{% endcall %}
+
+{% call card('就本报告追问') %}
+<p class="muted small" style="margin-top:-4px">就这份报告的结论自然语言提问。回答只基于本报告快照,不改数据、不改目标。想要新数据的判断请「重新分析」。</p>
+<div id="fu-list" class="fu-list">
+  {% for f in followups %}
+  <div class="fu-item">
+    <div class="bubble me fu-q">{{ f.question }}</div>
+    <div class="bubble ai md-body">{{ render_markdown(f.answer_md)|safe }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% if has_llm %}
+<form id="fu-form" class="chat-input" data-report="{{ report.id }}">
+  <textarea id="fu-text" rows="2" placeholder="例如:为什么说这周力量偏多?如果减一次腿训会怎样?"></textarea>
+  <div class="chat-actions"><button type="submit" id="fu-btn">追问</button></div>
+</form>
+<script src="/static/js/report_followup.js" defer></script>
+{% else %}
+<p class="muted small">未配置 LLM Key,无法追问。<a href="/settings/credentials">去设置</a></p>
+{% endif %}
+{% endcall %}
+
 <div class="actions">
   <form method="post" action="/api/analysis/reports/{{ report.id }}/reanalyze"><button type="submit">重新分析</button></form>
   <a class="button secondary" href="/reports">返回报告列表</a>

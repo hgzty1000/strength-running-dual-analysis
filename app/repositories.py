@@ -81,6 +81,34 @@ def list_garmin_activities(user_id: str, limit: int = 100) -> list[dict]:
         return out
 
 
+def set_activity_temperature(user_id: str, activity_id: str, temp_c: float | None) -> dict:
+    """手工标注/清除某跑步活动的气温。
+
+    传入数值 → 落库并标 temperature_source='manual';
+    传 None → 清空温度, source 回 'missing'。
+    仅对有跑步指标行的活动生效 (running family)。范围校验 -50~60°C。
+    """
+    if temp_c is not None:
+        if not (-50.0 <= temp_c <= 60.0):
+            raise ValueError("气温需在 -50~60°C 之间")
+        temp_c = round(temp_c, 1)
+        source = "manual"
+    else:
+        source = "missing"
+    now = now_utc()
+    with db() as conn:
+        act = conn.execute("SELECT id FROM garmin_activities WHERE user_id=? AND id=?", (user_id, activity_id)).fetchone()
+        if not act:
+            raise ValueError("活动不存在")
+        cur = conn.execute(
+            "UPDATE running_activity_metrics SET temperature_c=?, temperature_source=?, updated_at=? WHERE user_id=? AND activity_id=?",
+            (temp_c, source, now, user_id, activity_id),
+        )
+        if cur.rowcount == 0:
+            raise ValueError("该活动无跑步指标, 不支持气温标注")
+    return {"temperature_c": temp_c, "temperature_source": source}
+
+
 def get_activity(user_id: str, activity_id: str) -> dict | None:
     with db() as conn:
         row = conn.execute(
@@ -329,6 +357,213 @@ def generate_report(user_id: str, start: str | None, end: str | None, trigger_ty
         )
     log_operation(user_id, "llm_analysis", "success", summary=f"report {report_id} {start}~{end}")
     return report_id
+
+
+def list_report_followups(user_id: str, report_id: str) -> list[dict]:
+    """某报告下的浅追问问答, 按时间正序。"""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, question, answer_md, created_at FROM report_followups WHERE user_id=? AND report_id=? ORDER BY created_at",
+            (user_id, report_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_report_followup(user_id: str, report_id: str, question: str, answer_md: str) -> str:
+    fid = new_id()
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO report_followups (id, user_id, report_id, question, answer_md, created_at) VALUES (?,?,?,?,?,?)",
+            (fid, user_id, report_id, question, answer_md, now_utc()),
+        )
+    return fid
+
+
+def recent_training_brief(user_id: str, days: int = 90) -> dict | None:
+    """近期训练概况 (只读), 供 AI 目标澄清做背景。不产生任何数据。
+
+    返回压缩后的小字典 (力量容量/主要肌群 + 跑量/跑步类型分布), 无数据则 None。
+    """
+    today = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).date()
+    start = (today - timedelta(days=days)).isoformat()
+    end = today.isoformat()
+    ctx = build_context(user_id, start, end)
+    st = ctx.get("strength", {})
+    run = ctx.get("running", {})
+    if not st.get("training_day_count") and not run.get("run_count"):
+        return None
+    top_groups = list(st.get("group_volume", {}).items())[:4]
+    brief: dict = {
+        "window_days": days,
+        "strength": {
+            "training_days": st.get("training_day_count", 0),
+            "total_volume_kg": st.get("total_volume_kg", 0),
+            "top_groups": [{"group": g, "volume_kg": v} for g, v in top_groups],
+        },
+        "running": {
+            "run_count": run.get("run_count", 0),
+            "total_km": run.get("total_km", 0),
+            "type_distribution": run.get("type_count", {}),
+        },
+    }
+    return brief
+
+
+# ---------------- 首页数据看板 ----------------
+
+def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
+    idx = (y * 12 + (m - 1)) + delta
+    return idx // 12, idx % 12 + 1
+
+
+def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, mapping: dict) -> dict:
+    """按给定的分桶定义 (bins + index_of 映射函数) 聚合一档看板数据。
+
+    bins: [{label, ...}] 12 个空桶 (旧→新); index_of(datestr)->桶下标或 None。
+    返回该档的 buckets(趋势)、muscle_groups(肌群分布)、run_types(跑步类型分布)、totals。
+    """
+    import datetime as _dt
+
+    buckets = [dict(b, strength_volume_kg=0.0, running_km=0.0, run_count=0) for b in bins]
+    group_volume: dict[str, float] = {}
+    run_type_count: dict[str, int] = {}
+
+    for r in srows:
+        wi = index_of(r["datestr"])
+        if wi is None:
+            continue
+        vol = (r["weight"] or 0) * (r["reps"] or 0)
+        buckets[wi]["strength_volume_kg"] += vol
+        group = mapping.get(r["action_name"], "未分类")
+        group_volume[group] = group_volume.get(group, 0.0) + vol
+
+    for r in run_rows:
+        d = r["local_date"] or (r["fit_start_time"][:10] if r["fit_start_time"] else None)
+        if not d:
+            continue
+        wi = index_of(d)
+        if wi is None:
+            continue
+        buckets[wi]["running_km"] += (r["distance_m"] or 0) / 1000
+        buckets[wi]["run_count"] += 1
+        rt = r["run_type"] or "mixed_unknown"
+        run_type_count[rt] = run_type_count.get(rt, 0) + 1
+
+    for b in buckets:
+        b["strength_volume_kg"] = round(b["strength_volume_kg"], 1)
+        b["running_km"] = round(b["running_km"], 2)
+
+    muscle = sorted(
+        ({"group": g, "volume_kg": round(v, 1)} for g, v in group_volume.items() if v > 0),
+        key=lambda x: (x["group"] == "未分类", -x["volume_kg"]),
+    )
+    from app.services.run_classify import label as _rt_label
+    run_types = sorted(
+        ({"type": t, "label": _rt_label(t), "count": c} for t, c in run_type_count.items() if c > 0),
+        key=lambda x: -x["count"],
+    )
+    total_vol = round(sum(b["strength_volume_kg"] for b in buckets), 1)
+    total_km = round(sum(b["running_km"] for b in buckets), 2)
+    total_runs = sum(b["run_count"] for b in buckets)
+    return {
+        "buckets": buckets,
+        "muscle_groups": muscle,
+        "run_types": run_types,
+        "totals": {"strength_volume_kg": total_vol, "running_km": total_km, "run_count": total_runs},
+    }
+
+
+def dashboard_stats(user_id: str, n: int = 12) -> dict:
+    """首页看板聚合 (只读): 日/周/月三档, 每档 N 桶趋势 + 肌群分布 + 跑步类型分布。
+
+    只读一次最宽窗口 (近 N 个月) 的数据, 再按三种粒度分桶。周一为每周起始
+    (与日历看板 firstweekday=0 一致)。返回:
+      periods: {day|week|month: {buckets:[{label,strength_volume_kg,running_km,run_count}],
+                                 muscle_groups:[{group,volume_kg}],
+                                 run_types:[{type,label,count}],
+                                 totals:{strength_volume_kg,running_km,run_count}}}
+      default: 'week'
+      has_data: bool
+    """
+    import datetime as _dt
+    today = _dt.datetime.now(_dt.timezone.utc).astimezone(_dt.timezone(_dt.timedelta(hours=8))).date()
+
+    # ── 三档分桶定义 ──
+    # 日: 近 N 天
+    day_start = today - _dt.timedelta(days=n - 1)
+    day_bins = [{"label": (day_start + _dt.timedelta(days=i)).strftime("%m/%d")} for i in range(n)]
+
+    def day_index(datestr: str) -> int | None:
+        try:
+            d = _dt.date.fromisoformat(datestr[:10])
+        except (ValueError, TypeError):
+            return None
+        idx = (d - day_start).days
+        return idx if 0 <= idx < n else None
+
+    # 周: 近 N 周 (周一起始)
+    this_monday = today - _dt.timedelta(days=today.weekday())
+    first_monday = this_monday - _dt.timedelta(weeks=n - 1)
+    week_bins = [{"label": (first_monday + _dt.timedelta(weeks=i)).strftime("%m/%d")} for i in range(n)]
+
+    def week_index(datestr: str) -> int | None:
+        try:
+            d = _dt.date.fromisoformat(datestr[:10])
+        except (ValueError, TypeError):
+            return None
+        idx = (d - first_monday).days // 7
+        return idx if 0 <= idx < n else None
+
+    # 月: 近 N 个月
+    first_y, first_m = _add_months(today.year, today.month, -(n - 1))
+    month_keys = [_add_months(first_y, first_m, i) for i in range(n)]
+    month_bins = [{"label": f"{ym[1]}月" + (f"'{ym[0] % 100:02d}" if ym[1] == 1 else "")} for ym in month_keys]
+    month_key_index = {ym: i for i, ym in enumerate(month_keys)}
+
+    def month_index(datestr: str) -> int | None:
+        try:
+            d = _dt.date.fromisoformat(datestr[:10])
+        except (ValueError, TypeError):
+            return None
+        return month_key_index.get((d.year, d.month))
+
+    # ── 一次性取最宽窗口 (月档起点即最早) ──
+    fetch_start = _dt.date(first_y, first_m, 1).isoformat()
+
+    with db() as conn:
+        srows = conn.execute(
+            """SELECT t.datestr, m.action_name, s.weight, s.reps
+            FROM xunji_trainings t
+            JOIN xunji_movements m ON m.training_id=t.id
+            JOIN xunji_sets s ON s.movement_id=m.id
+            WHERE t.user_id=? AND t.datestr>=?""",
+            (user_id, fetch_start),
+        ).fetchall()
+        mapping = {
+            r["source_action_name"]: r["primary_group"]
+            for r in conn.execute(
+                "SELECT source_action_name, primary_group FROM exercise_muscle_mappings WHERE user_id=? AND source_system='xunji'",
+                (user_id,),
+            ).fetchall()
+        }
+        run_rows = conn.execute(
+            """SELECT a.local_date, a.fit_start_time, a.distance_m, rm.run_type
+            FROM garmin_activities a
+            LEFT JOIN running_activity_metrics rm ON rm.activity_id=a.id
+            WHERE a.user_id=? AND a.activity_family='running'""",
+            (user_id,),
+        ).fetchall()
+
+    periods = {
+        "day": _dashboard_period(day_bins, day_index, srows, run_rows, mapping),
+        "week": _dashboard_period(week_bins, week_index, srows, run_rows, mapping),
+        "month": _dashboard_period(month_bins, month_index, srows, run_rows, mapping),
+    }
+    has_data = any(
+        p["totals"]["strength_volume_kg"] > 0 or p["totals"]["run_count"] > 0
+        for p in periods.values()
+    )
+    return {"periods": periods, "default": "week", "n": n, "has_data": has_data}
 
 
 # ---------------- 日历看板 ----------------

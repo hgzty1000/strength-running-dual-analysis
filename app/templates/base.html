@@ -1,8 +1,20 @@
+{% set _icons = {
+  'home': '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  'data': '<path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/>',
+  'goals': '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>',
+  'rest': '<path d="M12 3v3"/><path d="M12 18v3"/><path d="M5 12H3"/><path d="M21 12h-2"/><circle cx="12" cy="12" r="4"/>',
+  'analysis': '<path d="M4 20V4"/><path d="M4 20h16"/><path d="m7 15 3-4 3 2 4-6"/>',
+  'reports': '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 13h5"/><path d="M10 16h5"/>',
+  'settings': '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'
+} %}
 {% macro nav(active) -%}
 <nav class="side-nav">
   <div class="brand">力跑双训分析系统</div>
   {% for href,label,key in [('/', '首页','home'),('/data/garmin','数据','data'),('/goals/current','目标','goals'),('/rest-notes','休整标注','rest'),('/analysis/new','分析','analysis'),('/reports','报告','reports'),('/settings/profile','设置','settings')] %}
-    <a class="nav-link {{ 'active' if active==key else '' }}" href="{{ href }}">{{ label }}</a>
+    <a class="nav-link {{ 'active' if active==key else '' }}" href="{{ href }}">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{ _icons[key]|safe }}</svg>
+      <span>{{ label }}</span>
+    </a>
   {% endfor %}
 </nav>
 {%- endmacro %}
@@ -36,7 +48,7 @@
   <main class="content">
     <header class="page-header">
       <h1>{{ title }}</h1>
-      {% if user %}<form method="post" action="/api/auth/logout"><button class="ghost" type="submit">退出 {{ user.username }}</button></form>{% endif %}
+      {% if user %}<form class="user-chip" method="post" action="/api/auth/logout"><button type="submit">退出 {{ user.username }}</button></form>{% endif %}
     </header>
 {%- endmacro %}
 

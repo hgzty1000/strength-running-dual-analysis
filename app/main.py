@@ -17,6 +17,7 @@ from app.db import db, init_db, new_id, now_utc
 from app.repositories import (
     add_rest_note,
     data_coverage,
+    dashboard_stats,
     day_detail,
     delete_rest_note,
     generate_report,
@@ -27,16 +28,24 @@ from app.repositories import (
     list_garmin_activities,
     list_rest_notes,
     month_calendar,
+    recent_training_brief,
+    list_report_followups,
+    add_report_followup,
     resync_xunji_day,
+    set_activity_temperature,
     start_xunji_sync,
 )
 from app.security import decrypt_secret, encrypt_secret, hash_password, mask_secret, new_token, token_hash, verify_password
 from app.services.garmin import family_label, variant_label
+from app.services.analysis import _goal_label as goal_label
+from app.markdown_lite import render as render_markdown
 
 app = FastAPI(title="力跑双训分析系统 Demo")
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["variant_label"] = variant_label
 templates.env.globals["family_label"] = family_label
+templates.env.globals["goal_label"] = goal_label
+templates.env.globals["render_markdown"] = render_markdown
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 SESSION_COOKIE = "sx_session"
@@ -151,6 +160,7 @@ def home(request: Request, year: int | None = None, month: int | None = None):
         m = today.month
     cal_data = month_calendar(user["id"], y, m)
     weeks = _build_calendar_grid(y, m, cal_data["days"])
+    dash = dashboard_stats(user["id"], 12)
     # 上/下月导航
     prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
     next_y, next_m = (y + 1, 1) if m == 12 else (y, m + 1)
@@ -159,7 +169,7 @@ def home(request: Request, year: int | None = None, month: int | None = None):
         latest_report = conn.execute("SELECT * FROM analysis_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 1", (user["id"],)).fetchone()
     return page(request, "home.html", cal=cal_data, weeks=weeks, year=y, month=m,
                 prev_y=prev_y, prev_m=prev_m, next_y=next_y, next_m=next_m,
-                today_iso=today.isoformat(), goal=goal, latest_report=latest_report)
+                today_iso=today.isoformat(), goal=goal, latest_report=latest_report, dash=dash)
 
 
 @app.get("/day/{datestr}", response_class=HTMLResponse)
@@ -236,6 +246,24 @@ def garmin_detail(request: Request, activity_id: str):
     if not activity:
         raise HTTPException(status_code=404, detail="活动不存在")
     return page(request, "garmin_detail.html", activity=activity)
+
+
+@app.post("/api/garmin/{activity_id}/temperature")
+def set_garmin_temperature(request: Request, activity_id: str, temperature_c: Annotated[str, Form()] = ""):
+    user = require_user(request)
+    raw = temperature_c.strip()
+    if raw == "":
+        temp: float | None = None  # 清空 → 回 missing
+    else:
+        try:
+            temp = float(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="气温需为数字") from exc
+    try:
+        set_activity_temperature(user["id"], activity_id, temp)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(f"/data/garmin/{activity_id}", status_code=303)
 
 
 @app.get("/data/xunji", response_class=HTMLResponse)
@@ -374,10 +402,10 @@ def credentials_page(request: Request):
         for row in conn.execute("SELECT * FROM user_credentials WHERE user_id=? AND revoked_at IS NULL", (user["id"],)).fetchall():
             try:
                 plain = decrypt_secret(row["ciphertext"], row["nonce"])
-                masked = mask_secret(plain)
-            except Exception:
-                masked = "解密失败"
-            creds[row["credential_type"]] = {"configured": True, "masked": masked}
+                # 与 get_credential / has_llm 口径一致: 能解密才算真正可用
+                creds[row["credential_type"]] = {"configured": True, "usable": True, "masked": mask_secret(plain)}
+            except Exception:  # noqa: BLE001
+                creds[row["credential_type"]] = {"configured": True, "usable": False, "masked": "无法解密"}
     llm = {"base_url": settings.llm_base_url, "model": settings.llm_model,
            "active": bool(settings.llm_base_url and settings.llm_model)}
     return page(request, "credentials.html", creds=creds, llm=llm)
@@ -421,20 +449,81 @@ def goal_page(request: Request):
     with db() as conn:
         goal = conn.execute("SELECT * FROM goal_config_versions WHERE user_id=? AND is_current=1", (user["id"],)).fetchone()
         history = conn.execute("SELECT * FROM goal_config_versions WHERE user_id=? ORDER BY version_number DESC", (user["id"],)).fetchall()
-    return page(request, "goals.html", goal=goal, history=history)
+    has_llm = get_credential(user["id"], "llm_key") is not None
+    return page(request, "goals.html", goal=goal, history=history, has_llm=has_llm)
 
 
 @app.post("/api/goals")
-def save_goal(request: Request, primary_goal: Annotated[str, Form()], running_goal_text: Annotated[str, Form()]="", strength_baseline_text: Annotated[str, Form()]="", conflict_policy_text: Annotated[str, Form()]="", uncertainties_text: Annotated[str, Form()]="", effective_from: Annotated[str, Form()]=""):
+def save_goal(request: Request, primary_goal: Annotated[str, Form()], running_goal_text: Annotated[str, Form()]="", strength_baseline_text: Annotated[str, Form()]="", conflict_policy_text: Annotated[str, Form()]="", uncertainties_text: Annotated[str, Form()]="", effective_from: Annotated[str, Form()]="", created_by: Annotated[str, Form()]="manual"):
     user = require_user(request)
     now = now_utc()
+    # 白名单: 只允许两种生成方式
+    if created_by not in ("manual", "ai_clarification"):
+        created_by = "manual"
     with db() as conn:
         row = conn.execute("SELECT coalesce(max(version_number),0)+1 v FROM goal_config_versions WHERE user_id=?", (user["id"],)).fetchone()
         version = row["v"]
         conn.execute("UPDATE goal_config_versions SET is_current=0,effective_to=? WHERE user_id=? AND is_current=1", (effective_from or now[:10], user["id"]))
         conn.execute("""INSERT INTO goal_config_versions (id,user_id,version_number,is_current,primary_goal,running_goal_text,strength_baseline_text,conflict_policy_text,uncertainties_text,effective_from,created_by,created_at,confirmed_at,details_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (new_id(), user["id"], version, 1, primary_goal, running_goal_text, strength_baseline_text, conflict_policy_text, uncertainties_text, effective_from or now[:10], "manual", now, now, "{}"))
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (new_id(), user["id"], version, 1, primary_goal, running_goal_text, strength_baseline_text, conflict_policy_text, uncertainties_text, effective_from or now[:10], created_by, now, now, "{}"))
     return RedirectResponse("/goals/current", status_code=303)
+
+
+@app.get("/goals/clarify", response_class=HTMLResponse)
+def goal_clarify_page(request: Request):
+    user = require_user(request)
+    has_llm = get_credential(user["id"], "llm_key") is not None
+    with db() as conn:
+        goal = conn.execute("SELECT * FROM goal_config_versions WHERE user_id=? AND is_current=1", (user["id"],)).fetchone()
+    return page(request, "goal_clarify.html", has_llm=has_llm, goal=goal)
+
+
+@app.post("/api/goals/clarify/message")
+async def goal_clarify_message(request: Request):
+    user = require_user(request)
+    llm_key = get_credential(user["id"], "llm_key")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "message": "请求体解析失败"}, status_code=400)
+    raw = payload.get("messages") or []
+    messages = [
+        {"role": m.get("role"), "content": str(m.get("content", ""))[:2000]}
+        for m in raw
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
+    ][-20:]
+    if not messages or messages[-1]["role"] != "user":
+        return JSONResponse({"ok": False, "message": "缺少用户消息"}, status_code=400)
+    brief = recent_training_brief(user["id"])
+    from app.services.llm import clarify_goal
+    result = clarify_goal(messages, brief, llm_key or "")
+    if not result.get("ok"):
+        return JSONResponse({"ok": False, "message": result.get("message", "调用失败")}, status_code=200)
+    # reply 为原文 (供前端存入对话上下文), reply_html 为渲染后安全 HTML
+    return JSONResponse({"ok": True, "reply": result["reply"], "reply_html": render_markdown(result["reply"])})
+
+
+@app.post("/api/goals/clarify/draft")
+async def goal_clarify_draft(request: Request):
+    user = require_user(request)
+    llm_key = get_credential(user["id"], "llm_key")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "message": "请求体解析失败"}, status_code=400)
+    raw = payload.get("messages") or []
+    messages = [
+        {"role": m.get("role"), "content": str(m.get("content", ""))[:2000]}
+        for m in raw
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
+    ][-20:]
+    if not messages:
+        return JSONResponse({"ok": False, "message": "对话为空, 无法汇成草案"}, status_code=400)
+    from app.services.llm import draft_goal
+    result = draft_goal(messages, llm_key or "")
+    if not result.get("ok"):
+        return JSONResponse({"ok": False, "message": result.get("message", "汇总失败")}, status_code=200)
+    return JSONResponse({"ok": True, "draft": result["draft"]})
 
 
 @app.get("/analysis/new", response_class=HTMLResponse)
@@ -503,4 +592,41 @@ def report_detail(request: Request, report_id: str):
         report = conn.execute("SELECT r.*, g.primary_goal, g.version_number AS goal_version FROM analysis_reports r JOIN goal_config_versions g ON g.id=r.goal_config_version_id WHERE r.user_id=? AND r.id=?", (user["id"], report_id)).fetchone()
     if not report:
         raise HTTPException(status_code=404, detail="报告不存在")
-    return page(request, "report_detail.html", report=report, structured=json.loads(report["structured_json"]))
+    followups = list_report_followups(user["id"], report_id)
+    has_llm = get_credential(user["id"], "llm_key") is not None
+    return page(request, "report_detail.html", report=report, structured=json.loads(report["structured_json"]),
+                followups=followups, has_llm=has_llm)
+
+
+@app.post("/api/reports/{report_id}/followup")
+async def report_followup(request: Request, report_id: str):
+    user = require_user(request)
+    with db() as conn:
+        report = conn.execute("SELECT * FROM analysis_reports WHERE user_id=? AND id=?", (user["id"], report_id)).fetchone()
+    if not report:
+        return JSONResponse({"ok": False, "message": "报告不存在"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "message": "请求体解析失败"}, status_code=400)
+    question = str(payload.get("question", "")).strip()[:1000]
+    if not question:
+        return JSONResponse({"ok": False, "message": "问题为空"}, status_code=400)
+    llm_key = get_credential(user["id"], "llm_key")
+    # 报告快照 (只读依据) + 本报告已有问答历史
+    snapshot = {
+        "context": json.loads(report["analysis_context_json"]),
+        "structured": json.loads(report["structured_json"]),
+        "narrative": report["narrative_md"],
+    }
+    history: list[dict] = []
+    for f in list_report_followups(user["id"], report_id):
+        history.append({"role": "user", "content": f["question"]})
+        history.append({"role": "assistant", "content": f["answer_md"]})
+    from app.services.llm import answer_followup
+    result = answer_followup(snapshot, history, question, llm_key or "")
+    if not result.get("ok"):
+        return JSONResponse({"ok": False, "message": result.get("message", "调用失败")}, status_code=200)
+    answer = result["answer"]
+    add_report_followup(user["id"], report_id, question, answer)
+    return JSONResponse({"ok": True, "answer": answer, "answer_html": render_markdown(answer)})

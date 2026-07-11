@@ -19,6 +19,23 @@ from app.services.muscle_mapping import get_mapping
 
 LOWER_BODY_GROUPS = {"腿", "臀部", "小腿"}
 
+# 热负荷分档阈值 (户外跑气温, 摄氏度)。仅用于方向性解读, 非精确处方。
+HEAT_WARM_C = 25.0
+HEAT_HOT_C = 30.0
+# 室内场景不参与热负荷解读 (跑步机温度是设备/体表读数, 非气象温度)。
+INDOOR_RUN_CONTEXTS = {"treadmill"}
+
+
+def _heat_band(temp_c: float | None) -> str | None:
+    """按气温分档: normal / warm / hot。无温度返回 None。"""
+    if temp_c is None:
+        return None
+    if temp_c >= HEAT_HOT_C:
+        return "hot"
+    if temp_c >= HEAT_WARM_C:
+        return "warm"
+    return "normal"
+
 
 def _parse_date(s: str | None) -> date | None:
     if not s:
@@ -95,7 +112,7 @@ def _running_summary(user_id: str, start_d: date | None, end_d: date | None) -> 
     with db() as conn:
         rows = conn.execute(
             """SELECT a.local_date, a.fit_start_time, a.distance_m, a.timer_seconds, a.activity_variant,
-                      r.avg_hr, r.max_hr, r.avg_power, r.run_context, r.run_type, r.temperature_source, r.avg_pace_sec_per_km
+                      r.avg_hr, r.max_hr, r.avg_power, r.run_context, r.run_type, r.temperature_c, r.temperature_source, r.avg_pace_sec_per_km
             FROM garmin_activities a
             LEFT JOIN running_activity_metrics r ON r.activity_id=a.id
             WHERE a.user_id=? AND a.activity_family='running'
@@ -108,7 +125,7 @@ def _running_summary(user_id: str, start_d: date | None, end_d: date | None) -> 
     total_seconds = 0.0
     variant_count: dict[str, int] = {}
     type_count: dict[str, int] = {}
-    missing_temp = 0
+    outdoor_missing_temp = 0  # 仅户外跑缺气温才算缺口 (室内跑无所谓气象温度)
     for r in rows:
         d = _parse_date(r["local_date"] or r["fit_start_time"])
         if start_d and d and d < start_d:
@@ -121,16 +138,22 @@ def _running_summary(user_id: str, start_d: date | None, end_d: date | None) -> 
         variant_count[r["activity_variant"]] = variant_count.get(r["activity_variant"], 0) + 1
         rt_label = _rt_label(r["run_type"])
         type_count[rt_label] = type_count.get(rt_label, 0) + 1
-        if (r["temperature_source"] or "missing") == "missing":
-            missing_temp += 1
+        context = r["run_context"] or "unknown"
+        is_indoor = context in INDOOR_RUN_CONTEXTS
+        temp_c = r["temperature_c"] if (r["temperature_source"] or "missing") != "missing" else None
+        if not is_indoor and temp_c is None:
+            outdoor_missing_temp += 1
         runs.append({
             "date": r["local_date"] or (r["fit_start_time"][:10] if r["fit_start_time"] else None),
             "variant": r["activity_variant"],
+            "run_context": context,
             "run_type": rt_label,
             "distance_km": round(km, 2),
             "avg_hr": r["avg_hr"],
             "avg_power": r["avg_power"],
             "pace_sec_per_km": r["avg_pace_sec_per_km"],
+            "temperature_c": round(temp_c, 1) if temp_c is not None else None,
+            "indoor": is_indoor,
         })
     hrs = [r["avg_hr"] for r in runs if r["avg_hr"]]
     return {
@@ -140,8 +163,39 @@ def _running_summary(user_id: str, start_d: date | None, end_d: date | None) -> 
         "variant_count": variant_count,
         "type_count": type_count,
         "avg_hr_overall": round(sum(hrs) / len(hrs), 1) if hrs else None,
-        "missing_temperature_count": missing_temp,
+        "missing_temperature_count": outdoor_missing_temp,
+        "heat": _heat_summary(runs),
         "runs": runs,
+    }
+
+
+def _heat_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """户外跑热负荷聚合。室内跑不参与。用于方向性心率解读, 非精确处方。
+
+    返回: 户外有温样本数、各热档次数、高温(warm+hot)跑均温与均心率、
+    以及高温跑相对全部户外跑的心率差 (正值表示高温跑心率更高)。
+    """
+    outdoor = [r for r in runs if not r["indoor"] and r["temperature_c"] is not None]
+    band_count: dict[str, int] = {"normal": 0, "warm": 0, "hot": 0}
+    for r in outdoor:
+        band = _heat_band(r["temperature_c"])
+        if band:
+            band_count[band] += 1
+    hot_runs = [r for r in outdoor if _heat_band(r["temperature_c"]) in ("warm", "hot")]
+    hot_hr = [r["avg_hr"] for r in hot_runs if r["avg_hr"]]
+    outdoor_hr = [r["avg_hr"] for r in outdoor if r["avg_hr"]]
+    hot_avg_hr = round(sum(hot_hr) / len(hot_hr), 1) if hot_hr else None
+    outdoor_avg_hr = round(sum(outdoor_hr) / len(outdoor_hr), 1) if outdoor_hr else None
+    hot_avg_temp = round(sum(r["temperature_c"] for r in hot_runs) / len(hot_runs), 1) if hot_runs else None
+    hr_delta = round(hot_avg_hr - outdoor_avg_hr, 1) if (hot_avg_hr is not None and outdoor_avg_hr is not None) else None
+    return {
+        "outdoor_with_temp_count": len(outdoor),
+        "band_count": band_count,
+        "hot_run_count": len(hot_runs),
+        "hot_avg_temp_c": hot_avg_temp,
+        "hot_avg_hr": hot_avg_hr,
+        "outdoor_avg_hr": outdoor_avg_hr,
+        "hot_vs_outdoor_hr_delta": hr_delta,
     }
 
 
@@ -186,7 +240,7 @@ def _coverage(ctx: dict[str, Any]) -> dict[str, Any]:
     if strength["unmapped_actions"]:
         warnings.append(f"有 {len(strength['unmapped_actions'])} 个动作未映射肌群, 力量分组可能不完整")
     if running["missing_temperature_count"]:
-        warnings.append(f"{running['missing_temperature_count']} 次跑步缺气温, 高温影响无法判断")
+        warnings.append(f"{running['missing_temperature_count']} 次户外跑缺气温, 该部分高温影响无法判断")
     if not ctx["goal"]:
         warnings.append("未配置当前目标, 无法按判断尺给出取舍")
     return {
@@ -235,6 +289,16 @@ def analyze_rule_based(ctx: dict[str, Any]) -> dict[str, Any]:
     # 跑量突增 (与区间日均粗比)
     if running["run_count"] >= 3 and run_km > 0:
         suggestions.append(f"区间跑量约 {run_km:.1f} km / {running['run_count']} 次, 关注跑量爬升是否过快")
+
+    # 热负荷—心率解读 (仅户外跑; 带前提, 只做方向性归因, 不改写心率值)
+    heat = running.get("heat", {})
+    if heat.get("hot_run_count", 0) > 0 and heat.get("hot_vs_outdoor_hr_delta") is not None:
+        delta = heat["hot_vs_outdoor_hr_delta"]
+        if delta >= 3:
+            risks.append(
+                f"{heat['hot_run_count']} 次高温户外跑(均温 {heat['hot_avg_temp_c']}°C)平均心率比"
+                f"其他户外跑高约 {delta:.0f} bpm, 可能是热负荷推高心率而非强度上升, 评估强度时建议校正"
+            )
 
     # 目标导向取舍
     if primary_goal == "running_race_priority":
@@ -290,6 +354,7 @@ def analyze_rule_based(ctx: dict[str, Any]) -> dict[str, Any]:
             "running_total_km": run_km,
             "running_count": running["run_count"],
             "running_variants": running["variant_count"],
+            "heat": running.get("heat", {}),
         },
         "double_line_conflicts": conflicts or ["未见明显双线排布冲突"],
         "risks": risks or ["未见突出风险"],

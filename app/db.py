@@ -318,6 +318,17 @@ CREATE TABLE IF NOT EXISTS analysis_reports (
 CREATE INDEX IF NOT EXISTS idx_reports_created ON analysis_reports(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_range ON analysis_reports(user_id, covered_start_date, covered_end_date);
 
+-- 浅追问问答: 挂在某份报告下, 只解释该报告快照; 不构成运动数据入口
+CREATE TABLE IF NOT EXISTS report_followups (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  report_id TEXT NOT NULL REFERENCES analysis_reports(id) ON DELETE CASCADE,
+  question TEXT NOT NULL,
+  answer_md TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_followups_report ON report_followups(report_id, created_at);
+
 CREATE TABLE IF NOT EXISTS operation_logs (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE SET NULL,

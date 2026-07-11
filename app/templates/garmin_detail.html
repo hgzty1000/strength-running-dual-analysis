@@ -10,9 +10,29 @@
   <dt>平均心率</dt><dd>{{ activity.avg_hr or '-' }}</dd>
   <dt>平均步频</dt><dd>{{ activity.avg_cadence or '-' }}</dd>
   <dt>平均功率</dt><dd>{{ activity.avg_power or '-' }}</dd>
-  <dt>气温来源</dt><dd>{{ activity.temperature_source or 'missing' }}</dd>
+  <dt>气温</dt><dd>
+    {% if activity.temperature_c is not none %}{{ '%.1f'|format(activity.temperature_c) }}°C{% else %}—{% endif %}
+    <span class="badge {{ 'ok' if activity.temperature_source == 'fit_native' else ('warn' if activity.temperature_source == 'manual' else '') }}">
+      {{ {'fit_native': '设备记录', 'manual': '手工标注', 'weather_api': '天气补全'}.get(activity.temperature_source, '缺气温') }}
+    </span>
+  </dd>
 </dl>
 {% endcall %}
+{% if activity.activity_family == 'running' %}
+{% call card('手工标注气温') %}
+{% if activity.activity_variant == 'treadmill_run' %}
+<p class="muted small">室内跑(跑步机)不参与热负荷—心率解读, 标注气温仅作记录。</p>
+{% else %}
+<p class="muted small">设备未记录气温时, 可按当时体感/天气手工填写, 用于分析里的热负荷—心率解读。</p>
+{% endif %}
+<form method="post" action="/api/garmin/{{ activity.id }}/temperature" class="form inline">
+  <label>气温 (°C)<input name="temperature_c" type="number" step="0.1" min="-50" max="60"
+    value="{{ '%.1f'|format(activity.temperature_c) if activity.temperature_c is not none else '' }}" placeholder="如 28.5"></label>
+  <button type="submit">保存</button>
+</form>
+<p class="muted small">留空并保存则清除气温, 来源回到「缺气温」。范围 -50~60°C。</p>
+{% endcall %}
+{% endif %}
 {% call card('Laps') %}
 <div class="activity-list">
 {% for lap in activity.laps %}
