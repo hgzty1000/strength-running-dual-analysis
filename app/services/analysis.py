@@ -3,7 +3,7 @@
 设计要点 (对齐 CONTEXT / 设计文档):
 - 上下文构建层独立, 只按 user_id + 区间取数, 不绑定 web session。AI 分析与未来只读 API 共用。
 - 分析只读数据, 不修改运动数据。
-- 容量计算: 见 `app/services/xunji.py` compute_set_volume(); 助力式按(体重-助力)×次数。
+- 容量计算: 见 `app/services/xunji.py` compute_set_volume(); 助力式按(体重-助力)reps。
 - 个人基线: 与用户自己的滚动基线比, 不套教科书标准。
 - 报告声明数据覆盖、前提、置信度、不确定项。
 - 无 LLM Key 时用规则引擎兜底, 保证 demo 可跑; 有 LLM 时可增强叙述层。
