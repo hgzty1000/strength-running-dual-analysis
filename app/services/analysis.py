@@ -3,7 +3,7 @@
 设计要点 (对齐 CONTEXT / 设计文档):
 - 上下文构建层独立, 只按 user_id + 区间取数, 不绑定 web session。AI 分析与未来只读 API 共用。
 - 分析只读数据, 不修改运动数据。
-- 容量优先: 力量用 组×次×重量, 不用训记时间戳判训练时长。
+- 容量计算: 见 `app/services/xunji.py` compute_set_volume(); 助力式按(体重-助力)×次数。
 - 个人基线: 与用户自己的滚动基线比, 不套教科书标准。
 - 报告声明数据覆盖、前提、置信度、不确定项。
 - 无 LLM Key 时用规则引擎兜底, 保证 demo 可跑; 有 LLM 时可增强叙述层。
@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.db import db
+from app.services import xunji as xunji_svc
 from app.services.muscle_mapping import get_mapping
 
 LOWER_BODY_GROUPS = {"腿", "臀部", "小腿"}
@@ -72,7 +73,7 @@ def _strength_summary(user_id: str, start: str, end: str) -> dict[str, Any]:
             FROM xunji_trainings t
             JOIN xunji_movements m ON m.training_id=t.id
             JOIN xunji_sets s ON s.movement_id=m.id
-            WHERE t.user_id=? AND t.datestr>=? AND t.datestr<=?""",
+            WHERE t.user_id=? AND t.datestr>=? AND t.datestr<=? AND s.done=1""",
             (user_id, start[:10], end[:10]),
         ).fetchall()
     group_volume: dict[str, float] = {}
@@ -80,15 +81,24 @@ def _strength_summary(user_id: str, start: str, end: str) -> dict[str, Any]:
     training_days: set[str] = set()
     total_volume = 0.0
     unmapped: set[str] = set()
+    # 取用户体重，助力式动作需要
+    try:
+        with db() as conn2:
+            bw = conn2.execute(
+                "SELECT weight_kg FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            body_weight = bw["weight_kg"] if bw else None
+    except Exception:
+        body_weight = None
     for r in rows:
         training_days.add(r["datestr"])
         mapping = get_mapping(user_id, r["action_name"])
         group = mapping["primary_group"] if mapping else "未分类"
         if group == "未分类":
             unmapped.add(r["action_name"])
-        weight = r["weight"] or 0
-        reps = r["reps"] or 0
-        volume = weight * reps
+        volume = xunji_svc.compute_set_volume(
+            r["weight"], r["reps"], r["action_name"], body_weight
+        )
         group_volume[group] = group_volume.get(group, 0.0) + volume
         group_sets[group] = group_sets.get(group, 0) + 1
         total_volume += volume

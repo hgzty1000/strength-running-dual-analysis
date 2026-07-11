@@ -18,6 +18,36 @@ from app.config import settings
 from app.db import db, new_id, now_utc
 
 
+# ---- 助力式动作判断 ----
+
+
+_ASSISTED_KEYWORDS = ["辅助", "助力"]
+
+
+def is_assisted_exercise(action_name: str) -> bool:
+    """通过动作名称关键词判断是否为助力式（辅助）动作。"""
+    return any(kw in action_name for kw in _ASSISTED_KEYWORDS)
+
+
+def compute_set_volume(
+    weight: float | None,
+    reps: int | None,
+    action_name: str = "",
+    body_weight_kg: float | None = None,
+) -> float:
+    """计算单组容量。
+
+    助力式动作（辅助引体/双杠臂屈伸等）：(体重 - 助力重量) × 次数。
+    负重式动作：重量 × 次数。
+    无体重数据时降级为普通公式。
+    """
+    w = weight or 0.0
+    r = reps or 0
+    if is_assisted_exercise(action_name) and body_weight_kg and body_weight_kg > 0:
+        return max(0.0, body_weight_kg - w) * r
+    return w * r
+
+
 class XunjiError(Exception):
     pass
 

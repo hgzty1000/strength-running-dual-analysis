@@ -1,8 +1,8 @@
 # 交接文档 (Demo 实现现状)
 
-- 日期: 2026-07-11
-- 版本: v0.2
-- 状态: demo 可运行, v0.2 功能闭环全通, 回归测试 113/113 通过
+- 日期: 2026-07-12
+- 版本: v0.2.1.1
+- 状态: demo 可运行, v0.2.1 功能闭环全通, 回归测试 113/113 通过, **已部署阿里云**
 - 项目名: **力跑双训分析系统** (原名"双修运动平台")
 - 面向: 接手继续开发/维护的人
 
@@ -22,7 +22,7 @@
 - SQLite (本地文件 `var/app.db`, WAL)
 - 原生 HTML/CSS, 无大型 UI 组件库, 一套页面响应式 (桌面侧栏 / 手机汉堡菜单)
 - 云端 LLM 可选 (OpenAI 兼容, 当前接 DeepSeek); 无 LLM 时规则引擎兜底
-- 依赖见 [requirements.txt](../requirements.txt)
+- 依赖见 [requirements.txt](../requirements.txt)（含 httpx）
 
 ## 3. 运行
 
@@ -142,10 +142,15 @@ garmin file/         48 个真实 Garmin zip 样本
 
 ## 10. 部署 (ADR 0001)
 
-- demo 本地优先; 架构已按云端可部署设计 (全配置化, 不写死路径/localhost)。
+- 已部署: 阿里云轻量应用服务器 (华东, 2vCPU/2GB/40GB, Ubuntu 24.04)
+- 公网地址: `http://106.14.241.47:8000` (方案 A: IP 直连, 无 HTTPS)
+- 服务管理: systemd `strength-run`, 开机自启 + 异常重启
+- 代码路径: `/opt/strength-run/`
+- 日志: `/opt/strength-run/var/logs/app.log`
+- 安全: SSH 仅密钥登录 (密码登录已关闭), UFW 仅开放 22+8000/tcp
+- LLM 当前未配 (`LLM_BASE_URL` 空), 规则引擎兜底
 - 云端走方案 A: `http://<公网IP>:<端口>` IP 直连, 仅 owner/可信设备, 关闭公开注册。
 - 朋友填训记 Key 必须等方案 C (HTTPS)。
-- 上真实数据前须完成服务器安全加固 (ADR 0001 遗留)。
 
 ## 11. 已知事项
 
@@ -154,6 +159,8 @@ garmin file/         48 个真实 Garmin zip 样本
 - 跑步类型是启发式规则, 非绝对; 用户可重分类, 但暂无逐条手动改类型的 UI。
 - `sub_sport=3` (trail_run) 已补入映射; 若 Garmin 新固件引入新的 sub_sport 值, 需在 `app/services/garmin.py` `RUN_VARIANT` 字典补条目。
 - `.env` 含明文 owner 密码和 Key 占位, 已在 `.gitignore`; 生产务必改 `ENCRYPTION_MASTER_KEY` 和密码。
+- 密码与 `.env` 同步: 修改密码需同时更新数据库 hash 和 `/opt/strength-run/.env` 的 `OWNER_PASSWORD` (仅影响重建库场景)，推荐本地改完上传避免 shell `$` 转义问题。
+- 容量计算: 参见 [deployment.md](deployment.md#代码层面的容量计算约定)。助力式动作（辅助引体/双杠臂屈伸）按 `(体重-助力重量)×reps` 计算；仅统计 done=1 的组。
 
 ## 12. 文档索引
 
@@ -161,3 +168,12 @@ garmin file/         48 个真实 Garmin zip 样本
 - 讨论过程备份: [docs/discussions/2026-07-08-可行性讨论备份.md](discussions/2026-07-08-可行性讨论备份.md)
 - ADR: [docs/adr/](adr/) (部署/训记镜像/多用户/对外API)
 - 设计: [docs/design/](design/) (范围/UE/架构/数据模型/接口)
+- 部署: [docs/deployment.md](deployment.md) (云端部署操作记录)
+
+## 13. 工作方式 (接手开发必读)
+
+- **磨需求比写代码重要**;大改动先出方案再动手。
+- 每次开发完跑 `python tests/test_end_to_end.py`,修到全绿。
+- 改 SQLite schema 要考虑已有数据迁移 (`CREATE TABLE IF NOT EXISTS` 安全)。
+- 所有环境项走配置,不写死路径/localhost。
+- 不引第三方前端/图表库 (项目一贯基调,已有零依赖自绘先例)。

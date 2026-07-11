@@ -416,11 +416,12 @@ def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
     return idx // 12, idx % 12 + 1
 
 
-def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, mapping: dict) -> dict:
+def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, mapping: dict, body_weight: float | None = None) -> dict:
     """按给定的分桶定义 (bins + index_of 映射函数) 聚合一档看板数据。
 
     bins: [{label, ...}] 12 个空桶 (旧→新); index_of(datestr)->桶下标或 None。
     返回该档的 buckets(趋势)、muscle_groups(肌群分布)、run_types(跑步类型分布)、totals。
+    body_weight: 用户体重，助力式动作容量计算需要。
     """
     import datetime as _dt
 
@@ -432,7 +433,7 @@ def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, m
         wi = index_of(r["datestr"])
         if wi is None:
             continue
-        vol = (r["weight"] or 0) * (r["reps"] or 0)
+        vol = xunji_svc.compute_set_volume(r["weight"], r["reps"], r["action_name"], body_weight)
         buckets[wi]["strength_volume_kg"] += vol
         group = mapping.get(r["action_name"], "未分类")
         group_volume[group] = group_volume.get(group, 0.0) + vol
@@ -531,12 +532,16 @@ def dashboard_stats(user_id: str, n: int = 12) -> dict:
     fetch_start = _dt.date(first_y, first_m, 1).isoformat()
 
     with db() as conn:
+        bw = conn.execute(
+            "SELECT weight_kg FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        body_weight = bw["weight_kg"] if bw else None
         srows = conn.execute(
             """SELECT t.datestr, m.action_name, s.weight, s.reps
             FROM xunji_trainings t
             JOIN xunji_movements m ON m.training_id=t.id
             JOIN xunji_sets s ON s.movement_id=m.id
-            WHERE t.user_id=? AND t.datestr>=?""",
+            WHERE t.user_id=? AND t.datestr>=? AND s.done=1""",
             (user_id, fetch_start),
         ).fetchall()
         mapping = {
@@ -555,9 +560,9 @@ def dashboard_stats(user_id: str, n: int = 12) -> dict:
         ).fetchall()
 
     periods = {
-        "day": _dashboard_period(day_bins, day_index, srows, run_rows, mapping),
-        "week": _dashboard_period(week_bins, week_index, srows, run_rows, mapping),
-        "month": _dashboard_period(month_bins, month_index, srows, run_rows, mapping),
+        "day": _dashboard_period(day_bins, day_index, srows, run_rows, mapping, body_weight),
+        "week": _dashboard_period(week_bins, week_index, srows, run_rows, mapping, body_weight),
+        "month": _dashboard_period(month_bins, month_index, srows, run_rows, mapping, body_weight),
     }
     has_data = any(
         p["totals"]["strength_volume_kg"] > 0 or p["totals"]["run_count"] > 0
@@ -586,13 +591,18 @@ def month_calendar(user_id: str, year: int, month: int) -> dict:
     days: dict[str, dict] = {}
 
     with db() as conn:
-        # 力量: 按天聚合容量, 并收集肌群 (经映射)
+        # 取用户体重, 助力式动作计算需要
+        bw = conn.execute(
+            "SELECT weight_kg FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        body_weight = bw["weight_kg"] if bw else None
+        # 力量: 按天聚合容量, 并收集肌群 (经映射); 仅统计 done=1 的组
         rows = conn.execute(
             """SELECT t.datestr, m.action_name, s.weight, s.reps
             FROM xunji_trainings t
             JOIN xunji_movements m ON m.training_id=t.id
             JOIN xunji_sets s ON s.movement_id=m.id
-            WHERE t.user_id=? AND t.datestr>=? AND t.datestr<=?""",
+            WHERE t.user_id=? AND t.datestr>=? AND t.datestr<=? AND s.done=1""",
             (user_id, start, end),
         ).fetchall()
         # 预取该用户全部映射, 避免逐条查询
@@ -607,7 +617,7 @@ def month_calendar(user_id: str, year: int, month: int) -> dict:
             d = r["datestr"]
             entry = days.setdefault(d, {})
             st = entry.setdefault("strength", {"volume": 0.0, "groups": {}})
-            vol = (r["weight"] or 0) * (r["reps"] or 0)
+            vol = xunji_svc.compute_set_volume(r["weight"], r["reps"], r["action_name"], body_weight)
             st["volume"] += vol
             group = mapping.get(r["action_name"], "未分类")
             st["groups"][group] = st["groups"].get(group, 0.0) + vol
@@ -688,7 +698,7 @@ def day_detail(user_id: str, datestr: str) -> dict:
                     "SELECT * FROM xunji_sets WHERE movement_id=? ORDER BY set_index",
                     (m["id"],),
                 ).fetchall()
-                vol = sum((s["weight"] or 0) * (s["reps"] or 0) for s in sets)
+                vol = sum((s["weight"] or 0) * (s["reps"] or 0) for s in sets if s["done"] == 1)
                 mlist.append({
                     "action_name": m["action_name"],
                     "group": mapping.get(m["action_name"], "未分类"),
