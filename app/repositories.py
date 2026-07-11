@@ -676,6 +676,11 @@ def day_detail(user_id: str, datestr: str) -> dict:
     """某天的完整运动详情: 力量训练(动作/组/容量) + 跑步活动。"""
     result: dict = {"date": datestr, "strength": [], "running": []}
     with db() as conn:
+        # 取用户体重, 助力式动作计算需要
+        bw = conn.execute(
+            "SELECT weight_kg FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        body_weight = bw["weight_kg"] if bw else None
         mapping = {
             r["source_action_name"]: r["primary_group"]
             for r in conn.execute(
@@ -698,7 +703,7 @@ def day_detail(user_id: str, datestr: str) -> dict:
                     "SELECT * FROM xunji_sets WHERE movement_id=? ORDER BY set_index",
                     (m["id"],),
                 ).fetchall()
-                vol = sum((s["weight"] or 0) * (s["reps"] or 0) for s in sets if s["done"] == 1)
+                vol = sum(xunji_svc.compute_set_volume(s["weight"], s["reps"], m["action_name"], body_weight) for s in sets if s["done"] == 1)
                 mlist.append({
                     "action_name": m["action_name"],
                     "group": mapping.get(m["action_name"], "未分类"),
