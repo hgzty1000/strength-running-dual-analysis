@@ -421,7 +421,7 @@ def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, m
 
     bins: [{label, ...}] 12 个空桶 (旧→新); index_of(datestr)->桶下标或 None。
     返回该档的 buckets(趋势)、muscle_groups(肌群分布)、run_types(跑步类型分布)、totals。
-    body_weight: 用户体重, 助力式动作容量计算需要 (无数据时降级为 weight×reps)。
+    body_weight: 用户体重, 助力式动作容量计算需要（无数据时降级为 weight×reps）。
     """
     import datetime as _dt
 
