@@ -1,7 +1,7 @@
 # 交接文档 (Demo 实现现状)
 
 - 日期: 2026-07-12
-- 版本: v0.2.1.1
+- 版本: v0.2.1
 - 状态: demo 可运行, v0.2.1 功能闭环全通, 回归测试 113/113 通过, **已部署阿里云**
 - 项目名: **力跑双训分析系统** (原名"双修运动平台")
 - 面向: 接手继续开发/维护的人
@@ -34,7 +34,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 打开 http://127.0.0.1:8000 , 用 `.env` 的 `OWNER_USERNAME`/`OWNER_PASSWORD` 登录。
 
-配置见 [.env.example](../.env.example)。LLM 相关: `LLM_BASE_URL` + `LLM_MODEL` 平台级配置 (当前 DeepSeek: `https://api.deepseek.com/v1` + `deepseek-v4-flash`), 用户在「设置→凭证」只填 Key。
+配置见 [.env.example](../.env.example)。LLM 相关: `LLM_BASE_URL` + `LLM_MODEL` 平台级配置 (当前 DeepSeek: `https://api.deepseek.com/v1` + `deepseek-v4-pro`), 用户在「设置→凭证」只填 Key。
 
 ## 4. 测试
 
@@ -76,7 +76,7 @@ scripts/
 tests/
   test_end_to_end.py
 catalog.json         训记动作 name→肌群type 映射 (259 条, 本地肌群来源)
-garmin file/         48 个真实 Garmin zip 样本
+garmin file/         真实 Garmin zip 样本 (已从 git 移除, 仅本地保留; 见 .gitignore)
 ```
 
 ## 6. 数据模型
