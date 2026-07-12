@@ -26,6 +26,12 @@ HEAT_HOT_C = 30.0
 # 室内场景不参与热负荷解读 (跑步机温度是设备/体表读数, 非气象温度)。
 INDOOR_RUN_CONTEXTS = {"treadmill"}
 
+# 跑步机强度解读 (心率优先)。跑步机配速受机器设定/无风阻影响, 且佳明拿不到
+# 坡度, 故配速不可信; 心率是唯一未被污染的强度信号。与用户自己的跑步机历史比
+# (个人基线), 不套 max HR / 心率区间等绝对标准。样本不足时只呈现不下判断。
+TREADMILL_MIN_SAMPLES = 3      # 做个人基线所需最少带心率样本, 不足只呈现
+TREADMILL_HR_ELEVATED_BPM = 5.0  # 高于自身跑步机均心率多少算偏高 (比热解读+3 略高)
+
 
 def _heat_band(temp_c: float | None) -> str | None:
     """按气温分档: normal / warm / hot。无温度返回 None。"""
@@ -36,6 +42,19 @@ def _heat_band(temp_c: float | None) -> str | None:
     if temp_c >= HEAT_WARM_C:
         return "warm"
     return "normal"
+
+
+def _as_num(v: Any) -> float | None:
+    """把可能的数值宽松转成 float; 非数值 (含空串/None) 返回 None。
+    用于 SQLite REAL 列的读侧守卫: 动态类型下列里可能混入字符串, 一律当缺失处理。"""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_date(s: str | None) -> date | None:
@@ -175,6 +194,7 @@ def _running_summary(user_id: str, start_d: date | None, end_d: date | None) -> 
         "avg_hr_overall": round(sum(hrs) / len(hrs), 1) if hrs else None,
         "missing_temperature_count": outdoor_missing_temp,
         "heat": _heat_summary(runs),
+        "treadmill": _treadmill_summary(runs),
         "runs": runs,
     }
 
@@ -206,6 +226,51 @@ def _heat_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "hot_avg_hr": hot_avg_hr,
         "outdoor_avg_hr": outdoor_avg_hr,
         "hot_vs_outdoor_hr_delta": hr_delta,
+    }
+
+
+def _treadmill_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """跑步机强度解读 (心率优先)。与 _heat_summary 平级, 只处理室内跑步机跑。
+
+    为何心率优先: 跑步机配速被两个洞污染 —— 无风阻(同配速能耗低于路跑),
+    且拿不到坡度设定(爬坡时配速显得慢但强度高)。故配速在跑步机上不可信,
+    心率是唯一没被污染的强度信号。
+
+    参照系是用户自己的跑步机历史均值 (个人基线), 不套 max HR / 心率区间公式。
+    样本不足 (<TREADMILL_MIN_SAMPLES 次带心率) 时 baseline_ready=False,
+    只呈现均值、不下判断, 避免"看似精确实则虚假"。
+    """
+    tm = [r for r in runs if r["indoor"]]
+    # 数值守卫: SQLite REAL 列动态类型, 理论上可能塞进非数值; 非数值一律当缺失,
+    # 避免 sum()/比较崩溃。与本仓库 garmin.py 的 isinstance 守卫风格一致。
+    tm_hr = [(r, hr) for r in tm if (hr := _as_num(r["avg_hr"])) is not None]
+    avg_hr = round(sum(hr for _, hr in tm_hr) / len(tm_hr), 1) if tm_hr else None
+    paces = [p for r in tm if (p := _as_num(r["pace_sec_per_km"])) is not None]
+    avg_pace = round(sum(paces) / len(paces), 1) if paces else None
+    baseline_ready = len(tm_hr) >= TREADMILL_MIN_SAMPLES
+
+    # 够样本时: 找"心率明显高于自身基线、但配速没更快"的次数
+    # —— 可能是坡度/机器设定推高强度, 而配速低估了它。
+    high_hr_flat_pace = 0
+    if baseline_ready and avg_hr is not None:
+        for r in tm:
+            hr = _as_num(r["avg_hr"])
+            if hr is None:
+                continue
+            hr_high = hr >= avg_hr + TREADMILL_HR_ELEVATED_BPM
+            # 配速没更快: 该次配速 >= 基线 (数值越大越慢)。缺配速则不据此判定。
+            pace = _as_num(r["pace_sec_per_km"])
+            pace_not_faster = avg_pace is not None and pace is not None and pace >= avg_pace
+            if hr_high and pace_not_faster:
+                high_hr_flat_pace += 1
+
+    return {
+        "treadmill_run_count": len(tm),
+        "with_hr_count": len(tm_hr),
+        "avg_hr": avg_hr,
+        "avg_pace_sec_per_km": avg_pace,
+        "baseline_ready": baseline_ready,
+        "high_hr_flat_pace_count": high_hr_flat_pace,
     }
 
 
@@ -310,6 +375,31 @@ def analyze_rule_based(ctx: dict[str, Any]) -> dict[str, Any]:
                 f"其他户外跑高约 {delta:.0f} bpm, 可能是热负荷推高心率而非强度上升, 评估强度时建议校正"
             )
 
+    # 跑步机强度解读 (心率优先; 配速受机器设定/无坡度/无风阻污染, 不可信)
+    # 带前提, 方向性归因, 不改写心率值。样本不足只呈现不下判断。
+    treadmill = running.get("treadmill", {})
+    tm_count = treadmill.get("treadmill_run_count", 0)
+    if tm_count > 0:
+        if not treadmill.get("baseline_ready"):
+            # 样本不足: 只呈现, 不下判断 (个人基线需 >= TREADMILL_MIN_SAMPLES 次带心率)
+            if treadmill.get("avg_hr") is not None:
+                suggestions.append(
+                    f"{tm_count} 次跑步机跑(均心率 {treadmill['avg_hr']:.0f} bpm): "
+                    f"样本较少, 暂以心率呈现、不做强度基线判断; 跑步机配速受机器设定影响, 参考心率为主"
+                )
+        else:
+            flat = treadmill.get("high_hr_flat_pace_count", 0)
+            if flat > 0:
+                risks.append(
+                    f"{flat} 次跑步机跑心率高于你跑步机平常约 {TREADMILL_HR_ELEVATED_BPM:.0f} bpm 以上、"
+                    f"配速却未更快 —— 跑步机拿不到坡度设定, 强度可能被配速低估, 评估时以心率为准"
+                )
+            else:
+                suggestions.append(
+                    f"{tm_count} 次跑步机跑(均心率 {treadmill['avg_hr']:.0f} bpm): "
+                    f"心率与你跑步机基线相符, 强度评估以心率为准 (跑步机配速不反映坡度)"
+                )
+
     # 目标导向取舍
     if primary_goal == "running_race_priority":
         suggestions.append("当前跑步比赛优先: 关键跑课优先, 腿训以维持为主, 不建议加量")
@@ -365,6 +455,7 @@ def analyze_rule_based(ctx: dict[str, Any]) -> dict[str, Any]:
             "running_count": running["run_count"],
             "running_variants": running["variant_count"],
             "heat": running.get("heat", {}),
+            "treadmill": running.get("treadmill", {}),
         },
         "double_line_conflicts": conflicts or ["未见明显双线排布冲突"],
         "risks": risks or ["未见突出风险"],

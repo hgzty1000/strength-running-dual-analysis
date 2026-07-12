@@ -475,6 +475,48 @@ def run() -> bool:
     r = client.get("/day/2020-01-01")
     check("day detail empty day renders", r.status_code == 200 and "没有训练记录" in r.text, f"status={r.status_code}")
 
+    # 16d. 跑步机心率强度解读 (_treadmill_summary 纯函数单元测试)
+    # 跑步机配速受机器设定/无坡度/无风阻污染, 故以心率为主参照, 与用户自己
+    # 跑步机历史比 (个人基线); 样本不足只呈现不下判断。
+    from app.services.analysis import _treadmill_summary, TREADMILL_MIN_SAMPLES
+
+    def _tm_run(hr, pace, indoor=True):
+        return {"indoor": indoor, "avg_hr": hr, "pace_sec_per_km": pace}
+
+    # (a) 样本不足 (<MIN): 只呈现均值, baseline_ready=False, 不下判断
+    few = _treadmill_summary([_tm_run(140, 360), _tm_run(142, 358)])
+    check("treadmill few-sample not ready", few["baseline_ready"] is False and few["treadmill_run_count"] == 2,
+          f"tm={few}")
+    check("treadmill few-sample still shows avg_hr", few["avg_hr"] is not None and few["high_hr_flat_pace_count"] == 0,
+          f"tm={few}")
+
+    # (b) 够样本 + 一次"心率高、配速没更快": 应标出 high_hr_flat_pace
+    #     基线均心率≈140, 末次 152 (高>+5) 且配速 370 (>=均值, 没更快)
+    many = _treadmill_summary([
+        _tm_run(138, 360), _tm_run(140, 358), _tm_run(139, 362), _tm_run(152, 370),
+    ])
+    check("treadmill baseline ready at min samples", many["baseline_ready"] is True
+          and many["with_hr_count"] >= TREADMILL_MIN_SAMPLES, f"tm={many}")
+    check("treadmill flags high-hr flat-pace run", many["high_hr_flat_pace_count"] >= 1, f"tm={many}")
+
+    # (c) 够样本但心率平稳: 不误报
+    steady = _treadmill_summary([
+        _tm_run(140, 360), _tm_run(141, 359), _tm_run(139, 361), _tm_run(140, 360),
+    ])
+    check("treadmill steady no false flag", steady["baseline_ready"] is True
+          and steady["high_hr_flat_pace_count"] == 0, f"tm={steady}")
+
+    # (d) 数值守卫: pace 为脏字符串时不崩, 当作缺失
+    dirty = _treadmill_summary([
+        _tm_run(140, "bad"), _tm_run(141, None), _tm_run(139, 361), _tm_run(150, "x"),
+    ])
+    check("treadmill numeric guard tolerates dirty pace", dirty["treadmill_run_count"] == 4
+          and dirty["avg_hr"] is not None, f"tm={dirty}")
+
+    # (e) 户外跑不计入跑步机聚合
+    mixed = _treadmill_summary([_tm_run(140, 360), _tm_run(145, 300, indoor=False)])
+    check("treadmill excludes outdoor runs", mixed["treadmill_run_count"] == 1, f"tm={mixed}")
+
     # 17. 登出
     r = client.post("/api/auth/logout", follow_redirects=False)
     check("logout redirects", r.status_code == 303)
