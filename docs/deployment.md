@@ -84,14 +84,43 @@ ssh root@106.14.241.47 "systemctl start strength-run"
 
 ## 数据备份
 
-SQLite 数据库: `/opt/strength-run/var/app.db`。备份示例:
+SQLite 数据库: `/opt/strength-run/var/app.db` (WAL 模式)。
+
+> ⚠️ **不要直接 `cp`/`scp` 单个 `app.db`**: 库是 WAL 模式, 此刻的写入可能还在 `app.db-wal` 里没落盘, 直拷单文件得到的可能是**不一致快照**。必须走 SQLite 在线 backup API 拿一致快照 —— 即下面的 `scripts/backup_db.sh`。
+
+### 同机每日备份 (已配置, 2026-07-12)
+
+- 脚本: [scripts/backup_db.sh](../scripts/backup_db.sh) —— 用 venv Python 调 SQLite 在线 backup API (WAL 安全) + `PRAGMA integrity_check` 校验 + gzip, 零新依赖。
+- cron (root): 每日 `03:17` 跑, 日志追加到 `var/logs/backup.log`。
+  ```
+  17 3 * * * /opt/strength-run/scripts/backup_db.sh >> /opt/strength-run/var/logs/backup.log 2>&1
+  ```
+- 产物: `/opt/strength-run/var/backups/app-YYYYmmdd-HHMMSS.db.gz`, 自动保留最近 **14** 份 (库约 4.4M, 压缩后 ~700K, 占用可忽略)。
+- 手动跑一次: `ssh root@106.14.241.47 /opt/strength-run/scripts/backup_db.sh`
+
+> **局限**: 同机备份防误删/误改/库损坏, 但**防不了整机/磁盘丢失** (备份与源库同一块盘)。异地保护靠下面的手动拉取。
+
+### 定期手动异地拉取 (防整机丢失)
+
+按需在本地跑, 把最新一份备份拉到服务器之外:
 
 ```bash
-# 从服务器拉取
-scp root@106.14.241.47:/opt/strength-run/var/app.db ./backup/app-$(date +%Y%m%d).db
+# 拉取服务器上最新的一份备份到本地 ./backup/
+mkdir -p backup
+ssh root@106.14.241.47 'ls -1t /opt/strength-run/var/backups/app-*.db.gz | head -1' \
+  | xargs -I{} scp root@106.14.241.47:{} ./backup/
+```
 
-# 或用 rsync
-rsync -avz root@106.14.241.47:/opt/strength-run/var/ ./backup/var/
+### 从备份恢复
+
+```bash
+# 1. 解压某份备份 (得到一致的 app.db)
+gunzip -k app-YYYYmmdd-HHMMSS.db.gz
+
+# 2. 停服务 -> 替换库 -> 起服务 (WAL 文件会由新库重新生成, 无需一起拷)
+ssh root@106.14.241.47 "systemctl stop strength-run"
+scp app-YYYYmmdd-HHMMSS.db root@106.14.241.47:/opt/strength-run/var/app.db
+ssh root@106.14.241.47 "systemctl start strength-run"
 ```
 
 ## 部署更新
@@ -133,7 +162,7 @@ ssh root@106.14.241.47 "
   - 所有 SQL 查询均已加 `AND s.done=1` 过滤
 
 - [ ] 方案 C (HTTPS): 买域名 + ICP 备案 + Let's Encrypt 证书 — 见 ADR 0001
-- [ ] 定期数据库备份
+- [x] 定期数据库备份 (2026-07-12: cron 每日 03:17 在线 backup + gzip, 保留 14 份, 见上方备份小节; 异地拉为手动)
 - [x] 配置 LLM (2026-07-12: DeepSeek `deepseek-v4-pro`, 连通测试通过 ~1.2s)
 - [ ] 改密码 UI (当前无界面, 需命令行改)
 - [x] 助力式动作容量修正 (2026-07-12: `compute_set_volume()` 按 `(体重-助力)×次数`, 见上方代码约定)
