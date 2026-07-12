@@ -48,8 +48,8 @@
 | `ENCRYPTION_MASTER_KEY` | 32 位随机字符串 | 改动会导致旧凭证无法解密 |
 | `ALLOW_PUBLIC_SIGNUP` | `false` | 关闭公开注册 |
 | `COOKIE_SECURE` | `false` | 方案 C (HTTPS) 时改为 true |
-| `LLM_BASE_URL` | (空) | 当前未配置 |
-| `LLM_MODEL` | (空) | 当前未配置 |
+| `LLM_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek 平台 (OpenAI 兼容) |
+| `LLM_MODEL` | `deepseek-v4-pro` | 平台支持 `deepseek-v4-pro` / `deepseek-v4-flash` |
 
 ## 密码管理
 
@@ -134,6 +134,6 @@ ssh root@106.14.241.47 "
 
 - [ ] 方案 C (HTTPS): 买域名 + ICP 备案 + Let's Encrypt 证书 — 见 ADR 0001
 - [ ] 定期数据库备份
-- [ ] 配置 LLM (DeepSeek 或其他 OpenAI 兼容平台)
+- [x] 配置 LLM (2026-07-12: DeepSeek `deepseek-v4-pro`, 连通测试通过 ~1.2s)
 - [ ] 改密码 UI (当前无界面, 需命令行改)
-- [ ] 助力式动作容量修正: 需要用户体重 + 动作类型判断，区分「负重式」与「助力式」——见上方代码约定
+- [x] 助力式动作容量修正 (2026-07-12: `compute_set_volume()` 按 `(体重-助力)×次数`, 见上方代码约定)

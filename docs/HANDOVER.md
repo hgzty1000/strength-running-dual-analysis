@@ -148,7 +148,7 @@ garmin file/         48 个真实 Garmin zip 样本
 - 代码路径: `/opt/strength-run/`
 - 日志: `/opt/strength-run/var/logs/app.log`
 - 安全: SSH 仅密钥登录 (密码登录已关闭), UFW 仅开放 22+8000/tcp
-- LLM 当前未配 (`LLM_BASE_URL` 空), 规则引擎兜底
+- LLM 已配置: DeepSeek (`https://api.deepseek.com/v1` + `deepseek-v4-pro`), 连通测试通过
 - 云端走方案 A: `http://<公网IP>:<端口>` IP 直连, 仅 owner/可信设备, 关闭公开注册。
 - 朋友填训记 Key 必须等方案 C (HTTPS)。
 
