@@ -64,6 +64,9 @@ def run() -> bool:
     r = client.get("/", follow_redirects=False)
     check("unauth home redirects to login", r.status_code == 303 and r.headers.get("location") == "/login",
           f"status={r.status_code} loc={r.headers.get('location')}")
+    r = client.get("/day/2026-06-30/share", follow_redirects=False)
+    check("unauth share redirects to login", r.status_code == 303 and r.headers.get("location") == "/login",
+          f"status={r.status_code} loc={r.headers.get('location')}")
 
     # 2. 错误密码
     r = client.post("/api/auth/login", data={"username": "owner", "password": "wrong"}, follow_redirects=False)
@@ -468,6 +471,39 @@ def run() -> bool:
     # 有跑步数据的某天 (Garmin 样本 2026-06-13)
     r = client.get("/day/2026-06-13")
     check("day detail renders (running)", r.status_code == 200 and "跑步" in r.text, f"status={r.status_code}")
+    # 16c-share. 分享页只展示训练白名单字段，且七种主题均可切换
+    r = client.get("/day/2026-06-30/share")
+    forbidden_share_fields = ["引体向上", "杠铃划船", "训练详情", "查看完整活动", "平均步频", "平均功率", "气温来源", "AI 分析"]
+    check("share renders strength-only card", r.status_code == 200 and "力量训练" in r.text and "背" in r.text
+          and all(field not in r.text for field in forbidden_share_fields), f"status={r.status_code}")
+    check("share page provides detail entry", "生成分享卡片" in client.get("/day/2026-06-30").text, "missing share entry")
+    r = client.get("/day/2026-06-13/share?theme=mono")
+    check("share renders running-only card", r.status_code == 200 and "跑步训练" in r.text and "平均心率" in r.text
+          and 'class="poster mono"' in r.text, f"status={r.status_code}")
+    r = client.get("/day/2020-01-01/share?theme=unknown")
+    check("share renders empty day and falls back theme", r.status_code == 200 and "这一天没有训练记录" in r.text
+          and 'class="poster clean"' in r.text, f"status={r.status_code}")
+    for share_theme in ["clean", "editorial", "midnight", "ember", "glacier", "citrus", "mono"]:
+        r = client.get(f"/day/2026-06-30/share?theme={share_theme}")
+        check(f"share theme {share_theme} renders", r.status_code == 200 and f'class="poster {share_theme}"' in r.text,
+              f"status={r.status_code}")
+    r = client.get("/day/2026-02-30/share", follow_redirects=False)
+    check("share rejects impossible date", r.status_code == 400, f"status={r.status_code}")
+    r = client.get("/day/notadate/share", follow_redirects=False)
+    check("share rejects bad date", r.status_code == 400, f"status={r.status_code}")
+    from app.repositories import _aggregate_share_runs
+    aggregate = _aggregate_share_runs([
+        {"activity_variant": "road_run", "fit_start_time": "2026-07-01T08:00:00", "id": "a",
+         "timer_seconds": 600, "distance_m": 2000, "run_type": "easy", "avg_pace_sec_per_km": 300, "avg_hr": 140},
+        {"activity_variant": "track_run", "fit_start_time": "2026-07-01T09:00:00", "id": "b",
+         "timer_seconds": 900, "distance_m": 3000, "run_type": "tempo", "avg_pace_sec_per_km": 300, "avg_hr": 150},
+    ])
+    check("share run aggregation is stable and private", aggregate["count"] == 2
+          and aggregate["distance_km"] == 5.0 and aggregate["duration_seconds"] == 1500
+          and aggregate["avg_pace_sec_per_km"] == 300.0 and aggregate["avg_hr"] == 146
+          and aggregate["type_labels"] == ["轻松跑", "节奏跑"]
+          and aggregate["context_labels"] == ["路跑", "操场"], f"aggregate={aggregate}")
+
     # 非法日期
     r = client.get("/day/notadate", follow_redirects=False)
     check("day detail rejects bad date", r.status_code == 400, f"status={r.status_code}")

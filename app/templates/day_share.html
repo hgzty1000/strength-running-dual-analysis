@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ share.date }} 训练分享 · 力跑双训分析系统</title>
+  <link rel="stylesheet" href="/static/css/share.css">
+</head>
+<body class="share-page">
+  <main class="share-shell">
+    <article class="poster {{ theme }}" id="poster" aria-label="{{ share.date }} 单日训练分享卡片">
+      <div class="poster-content">
+        <div class="topline">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 15.5 9 11l3 3 7-7"/><path d="M5 20h14"/>
+              </svg>
+            </span>
+            <span>力跑双训</span>
+          </div>
+          <span class="edition">DAILY TRAINING · 01</span>
+        </div>
+
+        <header class="date-block">
+          <p class="date">{{ share.date[5:7] }}<span>/</span>{{ share.date[8:10] }}</p>
+          <p class="date-sub">{{ share.weekday_label }}&nbsp;&nbsp;·&nbsp;&nbsp;今日训练记录</p>
+        </header>
+
+        {% if share.has_training %}
+        <section class="hero-metrics{% if not share.strength or not share.running %} single{% endif %}" aria-label="训练总览">
+          {% if share.strength %}
+          <div class="hero-metric">
+            <p class="metric-value">{{ '{:,.0f}'.format(share.strength.volume_kg) }} <em>kg</em></p>
+            <p class="metric-label">力量容量</p>
+          </div>
+          {% endif %}
+          {% if share.running %}
+          <div class="hero-metric run">
+            <p class="metric-value">{% if share.running.distance_km is not none %}{{ '%.2f'|format(share.running.distance_km) }}{% else %}—{% endif %} <em>km</em></p>
+            <p class="metric-label">跑步距离{% if share.running.count > 1 %} · {{ share.running.count }} 次{% endif %}</p>
+          </div>
+          {% endif %}
+        </section>
+
+        {% if share.strength %}
+        <section class="section" aria-label="力量训练">
+          <div class="section-head"><h2 class="section-title">力量训练</h2><span class="section-rule"></span></div>
+          <div class="body-tags">
+            {% for body_part in share.strength.body_parts %}<span class="tag">{{ body_part }}</span>{% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        {% if share.running %}
+        {% set run = share.running %}
+        <section class="section" aria-label="跑步训练">
+          <div class="section-head"><h2 class="section-title">跑步训练</h2><span class="section-rule"></span></div>
+          <div class="run-card">
+            <div class="run-heading">
+              <div class="run-type"><span class="run-dot"></span><span>{{ run.type_labels|join(' / ') }}</span></div>
+              <span class="run-context">{{ run.context_labels|join(' / ') }}</span>
+            </div>
+            <div class="run-stats">
+              <div class="run-stat">
+                <p class="run-stat-value">{% if run.distance_km is not none %}{{ '%.2f'|format(run.distance_km) }} km{% else %}—{% endif %}</p>
+                <p class="run-stat-label">距离</p>
+              </div>
+              <div class="run-stat">
+                {% if run.duration_seconds is not none %}
+                  {% set duration = run.duration_seconds|int %}
+                  {% set duration_hours = duration // 3600 %}
+                  {% set duration_minutes = (duration % 3600) // 60 %}
+                  {% set duration_seconds = duration % 60 %}
+                  <p class="run-stat-value">{% if duration_hours %}{{ duration_hours }}:{% endif %}{{ '%02d'|format(duration_minutes) }}:{{ '%02d'|format(duration_seconds) }}</p>
+                {% else %}<p class="run-stat-value">—</p>{% endif %}
+                <p class="run-stat-label">用时</p>
+              </div>
+              <div class="run-stat">
+                {% if run.avg_pace_sec_per_km is not none %}
+                  {% set pace = run.avg_pace_sec_per_km|int %}
+                  <p class="run-stat-value">{{ pace // 60 }}'{{ '%02d'|format(pace % 60) }}"</p>
+                {% else %}<p class="run-stat-value">—</p>{% endif %}
+                <p class="run-stat-label">平均配速 / km</p>
+              </div>
+            </div>
+            <div class="run-extra"><span>平均心率</span><strong>{% if run.avg_hr is not none %}{{ run.avg_hr }} bpm{% else %}—{% endif %}</strong></div>
+          </div>
+        </section>
+        {% endif %}
+        {% else %}
+        <section class="empty-state" aria-label="无训练记录">
+          <p class="empty-mark">—</p>
+          <p class="empty-title">这一天没有训练记录</p>
+          <p class="empty-copy">等下一次训练，继续保持节奏。</p>
+        </section>
+        {% endif %}
+
+        <section class="closing">
+          <p class="closing-copy">{% if share.strength and share.running %}今天完成力量与跑步双线训练{% elif share.strength %}今天完成力量训练{% elif share.running %}今天完成跑步训练{% else %}今天留给身体一点休息{% endif %}</p>
+          <div class="footer"><span><span class="footer-rule"></span><span class="footer-name">力跑双训分析系统</span></span><span>KEEP MOVING</span></div>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <nav class="share-toolbar" aria-label="分享卡片视觉方案切换">
+    <a class="back-link" href="/day/{{ share.date }}">返回详情</a>
+    <span class="toolbar-label">视觉方案</span>
+    {% for theme_name, theme_label in [('clean', '清爽数据卡'), ('editorial', '杂志海报'), ('midnight', '深色夜跑'), ('ember', '炉火暖橙'), ('glacier', '冰川清透'), ('citrus', '柑橘能量'), ('mono', '黑白网格')] %}
+    <a class="theme-button{% if theme == theme_name %} active{% endif %}" data-theme="{{ theme_name }}" href="/day/{{ share.date }}/share?theme={{ theme_name }}">{{ theme_label }}</a>
+    {% endfor %}
+  </nav>
+</body>
+</html>

@@ -734,6 +734,136 @@ def day_detail(user_id: str, datestr: str) -> dict:
     return result
 
 
+def _aggregate_share_runs(rows) -> dict | None:
+    if not rows:
+        return None
+
+    distance_values = [float(r["distance_m"]) for r in rows if r["distance_m"] is not None and float(r["distance_m"]) > 0]
+    duration_values = [float(r["timer_seconds"]) for r in rows if r["timer_seconds"] is not None and float(r["timer_seconds"]) > 0]
+    total_distance_m = sum(distance_values) if distance_values else None
+    total_duration_seconds = sum(duration_values) if duration_values else None
+
+    pace_values = [
+        (float(r["avg_pace_sec_per_km"]), float(r["distance_m"]))
+        for r in rows
+        if r["avg_pace_sec_per_km"] is not None
+        and float(r["avg_pace_sec_per_km"]) > 0
+        and r["distance_m"] is not None
+        and float(r["distance_m"]) > 0
+    ]
+    if total_distance_m and total_duration_seconds:
+        avg_pace = total_duration_seconds / (total_distance_m / 1000)
+    elif pace_values:
+        pace_weight = sum(distance for _, distance in pace_values)
+        avg_pace = sum(pace * distance for pace, distance in pace_values) / pace_weight if pace_weight else None
+    else:
+        avg_pace = None
+
+    hr_values = [
+        (float(r["avg_hr"]), float(r["timer_seconds"] or 0), float(r["distance_m"] or 0))
+        for r in rows
+        if r["avg_hr"] is not None and float(r["avg_hr"]) > 0
+    ]
+    if hr_values:
+        duration_weight = sum(duration for _, duration, _ in hr_values)
+        distance_weight = sum(distance for _, _, distance in hr_values)
+        if duration_weight > 0:
+            avg_hr = sum(value * duration for value, duration, _ in hr_values) / duration_weight
+        elif distance_weight > 0:
+            avg_hr = sum(value * distance for value, _, distance in hr_values) / distance_weight
+        else:
+            avg_hr = sum(value for value, _, _ in hr_values) / len(hr_values)
+    else:
+        avg_hr = None
+
+    type_labels = []
+    context_labels = []
+    from app.services.garmin import variant_label
+    from app.services.run_classify import label as run_type_label
+    for row in rows:
+        type_label = run_type_label(row["run_type"])
+        context_label = variant_label(row["activity_variant"])
+        if type_label not in type_labels:
+            type_labels.append(type_label)
+        if context_label not in context_labels:
+            context_labels.append(context_label)
+
+    return {
+        "count": len(rows),
+        "type_labels": type_labels,
+        "context_labels": context_labels,
+        "distance_km": round(total_distance_m / 1000, 2) if total_distance_m is not None else None,
+        "duration_seconds": round(total_duration_seconds, 1) if total_duration_seconds is not None else None,
+        "avg_pace_sec_per_km": round(avg_pace, 1) if avg_pace is not None else None,
+        "avg_hr": round(avg_hr) if avg_hr is not None else None,
+    }
+
+
+def day_share_detail(user_id: str, datestr: str) -> dict:
+    """返回某天适合分享的最小训练内容视图，不包含活动或动作明细。"""
+    result = {
+        "date": datestr,
+        "weekday_label": ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")[date.fromisoformat(datestr).weekday()],
+        "strength": None,
+        "running": None,
+        "has_training": False,
+    }
+    with db() as conn:
+        bw = conn.execute(
+            "SELECT weight_kg FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        body_weight = bw["weight_kg"] if bw else None
+        mapping = {
+            r["source_action_name"]: r["primary_group"]
+            for r in conn.execute(
+                "SELECT source_action_name, primary_group FROM exercise_muscle_mappings WHERE user_id=? AND source_system='xunji'",
+                (user_id,),
+            ).fetchall()
+        }
+        trainings = conn.execute(
+            "SELECT id FROM xunji_trainings WHERE user_id=? AND datestr=? ORDER BY id",
+            (user_id, datestr),
+        ).fetchall()
+        body_parts = []
+        strength_volume = 0.0
+        for training in trainings:
+            movements = conn.execute(
+                "SELECT id, action_name FROM xunji_movements WHERE training_id=? ORDER BY movement_index",
+                (training["id"],),
+            ).fetchall()
+            for movement in movements:
+                group = mapping.get(movement["action_name"], "未分类")
+                if group not in body_parts:
+                    body_parts.append(group)
+                sets = conn.execute(
+                    "SELECT weight, reps, done FROM xunji_sets WHERE movement_id=? ORDER BY set_index",
+                    (movement["id"],),
+                ).fetchall()
+                strength_volume += sum(
+                    xunji_svc.compute_set_volume(s["weight"], s["reps"], movement["action_name"], body_weight)
+                    for s in sets if s["done"] == 1
+                )
+        if trainings:
+            result["strength"] = {
+                "volume_kg": round(strength_volume, 1),
+                "body_parts": body_parts,
+            }
+
+        runs = conn.execute(
+            """SELECT a.activity_variant, a.fit_start_time, a.id, a.timer_seconds, a.distance_m,
+                      r.run_type, r.avg_pace_sec_per_km, r.avg_hr
+               FROM garmin_activities a
+               LEFT JOIN running_activity_metrics r ON r.activity_id=a.id
+               WHERE a.user_id=? AND a.activity_family='running'
+                 AND (a.local_date=? OR substr(a.fit_start_time,1,10)=?)
+               ORDER BY a.fit_start_time, a.id""",
+            (user_id, datestr, datestr),
+        ).fetchall()
+        result["running"] = _aggregate_share_runs(runs)
+        result["has_training"] = result["strength"] is not None or result["running"] is not None
+    return result
+
+
 # ---------------- 操作日志 ----------------
 
 def log_operation(user_id: str | None, operation_type: str, status: str, summary: str | None = None, error: str | None = None) -> None:

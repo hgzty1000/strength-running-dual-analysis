@@ -1,6 +1,9 @@
 {% from 'base.html' import layout_start, layout_end, card %}
 {{ layout_start('home', detail.date ~ ' 运动详情', user) }}
-<a class="button secondary" href="/">← 返回日历</a>
+<div class="actions">
+  <a class="button secondary" href="/">← 返回日历</a>
+  <a class="button" href="/day/{{ detail.date }}/share?theme=clean">生成分享卡片</a>
+</div>
 
 {% if not detail.strength and not detail.running %}
 <div class="card"><p class="muted">这一天没有训练记录。</p></div>

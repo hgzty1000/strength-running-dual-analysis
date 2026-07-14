@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -19,6 +19,7 @@ from app.repositories import (
     data_coverage,
     dashboard_stats,
     day_detail,
+    day_share_detail,
     delete_rest_note,
     generate_report,
     get_activity,
@@ -172,12 +173,37 @@ def home(request: Request, year: int | None = None, month: int | None = None):
                 today_iso=today.isoformat(), goal=goal, latest_report=latest_report, dash=dash)
 
 
-@app.get("/day/{datestr}", response_class=HTMLResponse)
-def day_page(request: Request, datestr: str):
-    user = require_user(request)
+SHARE_THEMES = {"clean", "editorial", "midnight", "ember", "glacier", "citrus", "mono"}
+
+
+def _validated_datestr(datestr: str) -> str:
     import re as _re
     if not _re.match(r"^\d{4}-\d{2}-\d{2}$", datestr):
         raise HTTPException(status_code=400, detail="日期格式错误")
+    try:
+        date.fromisoformat(datestr)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期无效") from exc
+    return datestr
+
+
+@app.get("/day/{datestr}/share", response_class=HTMLResponse)
+def day_share_page(request: Request, datestr: str, theme: str = "clean"):
+    user = require_user(request)
+    datestr = _validated_datestr(datestr)
+    share = day_share_detail(user["id"], datestr)
+    selected_theme = theme if theme in SHARE_THEMES else "clean"
+    return templates.TemplateResponse(
+        request,
+        "day_share.html",
+        {"user": user, "share": share, "theme": selected_theme},
+    )
+
+
+@app.get("/day/{datestr}", response_class=HTMLResponse)
+def day_page(request: Request, datestr: str):
+    user = require_user(request)
+    datestr = _validated_datestr(datestr)
     detail = day_detail(user["id"], datestr)
     return page(request, "day.html", detail=detail)
 
