@@ -131,7 +131,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 python tests/test_end_to_end.py
 ```
 
-当前回归状态: **113 / 113 checks passed**
+当前回归状态: **135 / 135 checks passed**
 
 覆盖包括:
 - 登录 / 鉴权
