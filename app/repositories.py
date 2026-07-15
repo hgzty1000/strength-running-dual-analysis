@@ -427,7 +427,7 @@ def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, m
 
     buckets = [dict(b, strength_volume_kg=0.0, running_km=0.0, run_count=0) for b in bins]
     group_volume: dict[str, float] = {}
-    run_type_count: dict[str, int] = {}
+    run_type_agg: dict[str, dict] = {}
 
     for r in srows:
         wi = index_of(r["datestr"])
@@ -445,10 +445,13 @@ def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, m
         wi = index_of(d)
         if wi is None:
             continue
-        buckets[wi]["running_km"] += (r["distance_m"] or 0) / 1000
+        km = (r["distance_m"] or 0) / 1000
+        buckets[wi]["running_km"] += km
         buckets[wi]["run_count"] += 1
         rt = r["run_type"] or "mixed_unknown"
-        run_type_count[rt] = run_type_count.get(rt, 0) + 1
+        agg = run_type_agg.setdefault(rt, {"distance_km": 0.0, "count": 0})
+        agg["distance_km"] += km
+        agg["count"] += 1
 
     for b in buckets:
         b["strength_volume_kg"] = round(b["strength_volume_kg"], 1)
@@ -460,8 +463,12 @@ def _dashboard_period(bins: list[dict], index_of, srows: list, run_rows: list, m
     )
     from app.services.run_classify import label as _rt_label
     run_types = sorted(
-        ({"type": t, "label": _rt_label(t), "count": c} for t, c in run_type_count.items() if c > 0),
-        key=lambda x: -x["count"],
+        (
+            {"type": t, "label": _rt_label(t),
+             "distance_km": round(a["distance_km"], 2), "count": a["count"]}
+            for t, a in run_type_agg.items() if a["count"] > 0
+        ),
+        key=lambda x: (-x["distance_km"], -x["count"]),
     )
     total_vol = round(sum(b["strength_volume_kg"] for b in buckets), 1)
     total_km = round(sum(b["running_km"] for b in buckets), 2)

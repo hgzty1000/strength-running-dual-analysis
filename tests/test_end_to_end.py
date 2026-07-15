@@ -433,15 +433,15 @@ def run() -> bool:
           or all(g["group"] != "未分类" for g in wk["muscle_groups"]),
           f"groups={[g['group'] for g in wk['muscle_groups']]}")
     check("dashboard run_types structured",
-          all(set(rt.keys()) >= {"type", "label", "count"} for rt in wk["run_types"]),
+          all(set(rt.keys()) >= {"type", "label", "distance_km", "count"} for rt in wk["run_types"]),
           f"run_types={wk['run_types']}")
-    check("dashboard run_types sorted desc",
-          all(wk["run_types"][i]["count"] >= wk["run_types"][i + 1]["count"]
+    check("dashboard run_types sorted by distance desc",
+          all(wk["run_types"][i]["distance_km"] >= wk["run_types"][i + 1]["distance_km"]
               for i in range(len(wk["run_types"]) - 1)),
-          f"run_types={[(t['label'], t['count']) for t in wk['run_types']]}")
-    check("dashboard run_type count reconciles run_count",
-          sum(rt["count"] for rt in wk["run_types"]) == wk["totals"]["run_count"],
-          f"sum={sum(rt['count'] for rt in wk['run_types'])} run_count={wk['totals']['run_count']}")
+          f"run_types={[(t['label'], t['distance_km']) for t in wk['run_types']]}")
+    check("dashboard run_type distance reconciles running_km",
+          abs(sum(rt["distance_km"] for rt in wk["run_types"]) - wk["totals"]["running_km"]) < 0.5,
+          f"sum={sum(rt['distance_km'] for rt in wk['run_types'])} running_km={wk['totals']['running_km']}")
     check("dashboard has_data flag", dash["has_data"] is True, f"has_data={dash['has_data']}")
     # 首页应渲染看板结构 (近期有数据时): 粒度切换 + 内嵌数据 + 饼图容器
     r = client.get("/")
@@ -503,6 +503,21 @@ def run() -> bool:
           and aggregate["avg_pace_sec_per_km"] == 300.0 and aggregate["avg_hr"] == 146
           and aggregate["type_labels"] == ["轻松跑", "节奏跑"]
           and aggregate["context_labels"] == ["路跑", "操场"], f"aggregate={aggregate}")
+
+    # 16c-export. PNG 导出: 有训练页含 vendor 脚本 + 导出按钮, 捕获目标锁定 #poster
+    r = client.get("/day/2026-06-30/share")
+    check("share page loads snapdom vendor + export script",
+          "/static/js/vendor/snapdom.min.js" in r.text and "/static/js/share_export.js" in r.text,
+          f"status={r.status_code}")
+    check("share page has export button on training day", 'id="save-png-button"' in r.text, "missing export button")
+    # 空白天无训练则不出导出按钮 (与「无训练无入口」边界一致)
+    r = client.get("/day/2020-01-01/share")
+    check("share page hides export button on empty day", 'id="save-png-button"' not in r.text, "export button leaked on empty day")
+    # vendor 脚本本体可静态访问 (离线可用, 不依赖 CDN)
+    r = client.get("/static/js/vendor/snapdom.min.js")
+    check("snapdom vendor asset served", r.status_code == 200 and "SnapDOM" in r.text, f"status={r.status_code}")
+    r = client.get("/static/js/share_export.js")
+    check("share export script served", r.status_code == 200 and "snapdom" in r.text, f"status={r.status_code}")
 
     # 非法日期
     r = client.get("/day/notadate", follow_redirects=False)

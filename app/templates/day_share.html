@@ -8,7 +8,7 @@
 </head>
 <body class="share-page">
   <main class="share-shell">
-    <article class="poster {{ theme }}" id="poster" aria-label="{{ share.date }} 单日训练分享卡片">
+    <article class="poster {{ theme }}" id="poster" data-share-date="{{ share.date }}" data-share-theme="{{ theme }}" aria-label="{{ share.date }} 单日训练分享卡片">
       <div class="poster-content">
         <div class="topline">
           <div class="brand">
@@ -106,10 +106,18 @@
 
   <nav class="share-toolbar" aria-label="分享卡片视觉方案切换">
     <a class="back-link" href="/day/{{ share.date }}">返回详情</a>
+    {% if share.has_training %}
+    <button type="button" class="save-png-button" id="save-png-button">保存 PNG</button>
+    {% endif %}
     <span class="toolbar-label">视觉方案</span>
     {% for theme_name, theme_label in [('clean', '清爽数据卡'), ('editorial', '杂志海报'), ('midnight', '深色夜跑'), ('ember', '炉火暖橙'), ('glacier', '冰川清透'), ('citrus', '柑橘能量'), ('mono', '黑白网格')] %}
     <a class="theme-button{% if theme == theme_name %} active{% endif %}" data-theme="{{ theme_name }}" href="/day/{{ share.date }}/share?theme={{ theme_name }}">{{ theme_label }}</a>
     {% endfor %}
   </nav>
+
+  {% if share.has_training %}
+  <script src="/static/js/vendor/snapdom.min.js"></script>
+  <script src="/static/js/share_export.js"></script>
+  {% endif %}
 </body>
 </html>

@@ -73,12 +73,12 @@
     el.innerHTML = html;
   }
 
-  // ── 跑步类型饼图 (SVG donut) ──
+  // ── 跑步类型饼图 (SVG donut, 按距离分布) ──
   function renderPie(runTypes) {
     var el = document.getElementById("chart-runtype");
     if (!el) return;
     var total = 0;
-    (runTypes || []).forEach(function (t) { total += t.count; });
+    (runTypes || []).forEach(function (t) { total += t.distance_km; });
     if (!total) {
       el.innerHTML = '<p class="muted small">该区间暂无跑步数据。</p>';
       return;
@@ -88,7 +88,7 @@
     var segs = "";
     var legend = "";
     runTypes.forEach(function (t, i) {
-      var frac = t.count / total;
+      var frac = t.distance_km / total;
       var color = PIE_COLORS[i % PIE_COLORS.length];
       var dash = (frac * circ).toFixed(2) + " " + (circ - frac * circ).toFixed(2);
       // stroke-dashoffset 负值使弧段顺时针从 12 点方向排布
@@ -96,21 +96,21 @@
         '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
         'stroke="' + color + '" stroke-width="18" ' +
         'stroke-dasharray="' + dash + '" stroke-dashoffset="' + (-offset * circ).toFixed(2) + '">' +
-        "<title>" + esc(t.label) + ": " + t.count + " 次 (" + Math.round(frac * 100) + "%)</title>" +
+        "<title>" + esc(t.label) + ": " + t.distance_km.toFixed(1) + " km / " + t.count + " 次 (" + Math.round(frac * 100) + "%)</title>" +
         "</circle>";
       legend +=
         '<div class="pie-leg-row">' +
         '<span class="pie-dot" style="background:' + color + '"></span>' +
         '<span class="pie-leg-lab">' + esc(t.label) + "</span>" +
-        '<span class="pie-leg-val">' + t.count + " 次 · " + Math.round(frac * 100) + "%</span>" +
+        '<span class="pie-leg-val">' + t.distance_km.toFixed(1) + " km · " + Math.round(frac * 100) + "%</span>" +
         "</div>";
       offset += frac;
     });
     el.innerHTML =
-      '<svg viewBox="0 0 120 120" class="pie-svg" role="img" aria-label="跑步类型分布饼图">' +
+      '<svg viewBox="0 0 120 120" class="pie-svg" role="img" aria-label="跑步类型分布饼图 (按距离)">' +
       '<g transform="rotate(-90 ' + cx + " " + cy + ')">' + segs + "</g>" +
-      '<text x="' + cx + '" y="' + (cy - 2) + '" class="pie-center-num">' + total + "</text>" +
-      '<text x="' + cx + '" y="' + (cy + 14) + '" class="pie-center-lab">次跑步</text>' +
+      '<text x="' + cx + '" y="' + (cy - 2) + '" class="pie-center-num">' + total.toFixed(1) + "</text>" +
+      '<text x="' + cx + '" y="' + (cy + 14) + '" class="pie-center-lab">km 跑量</text>' +
       "</svg>" +
       '<div class="pie-legend">' + legend + "</div>";
   }
