@@ -8,6 +8,8 @@
 </head>
 <body class="share-page">
   <main class="share-shell">
+    <div class="poster-frame" id="poster-frame">
+      <div class="poster-scale" id="poster-scale">
     <article class="poster {{ theme }}" id="poster" data-share-date="{{ share.date }}" data-share-theme="{{ theme }}" aria-label="{{ share.date }} 单日训练分享卡片">
       <div class="poster-content">
         <div class="topline">
@@ -102,6 +104,8 @@
         </section>
       </div>
     </article>
+      </div>
+    </div>
   </main>
 
   <nav class="share-toolbar" aria-label="分享卡片视觉方案切换">
@@ -115,6 +119,7 @@
     {% endfor %}
   </nav>
 
+  <script src="/static/js/share_fit.js"></script>
   {% if share.has_training %}
   <script src="/static/js/vendor/snapdom.min.js"></script>
   <script src="/static/js/share_export.js"></script>

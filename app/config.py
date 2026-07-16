@@ -43,6 +43,8 @@ class Settings:
     llm_model: str
     owner_username: str
     owner_password: str
+    outbound_api_enabled: bool
+    api_key_prefix: str
 
 
 def _bool(value: str | None, default: bool = False) -> bool:
@@ -76,6 +78,8 @@ def load_settings() -> Settings:
         llm_model=os.getenv("LLM_MODEL", ""),
         owner_username=os.getenv("OWNER_USERNAME", "owner"),
         owner_password=os.getenv("OWNER_PASSWORD", "change-me"),
+        outbound_api_enabled=_bool(os.getenv("OUTBOUND_API_ENABLED"), False),
+        api_key_prefix=os.getenv("API_KEY_PREFIX", "srda_"),
     )
 
 

@@ -25,10 +25,29 @@
     return name;
   }
 
+  // 窄屏下 #poster 的祖先 #poster-scale 带 transform: scale(); 导出前临时归位,
+  // 确保 snapdom 无论用 getBoundingClientRect 还是 offsetWidth 测量, 都拿到 450×600
+  // 原始逻辑尺寸, 导出图不被连带缩小。拍完(无论成败)恢复原缩放。
+  var scaleEl = document.getElementById("poster-scale");
+
+  function freezeScale() {
+    if (!scaleEl) return null;
+    var prev = scaleEl.style.transform;
+    scaleEl.style.transform = "none";
+    return prev;
+  }
+
+  function restoreScale(prev) {
+    if (!scaleEl) return;
+    scaleEl.style.transform = prev || "";
+  }
+
   btn.addEventListener("click", function () {
     if (btn.disabled) return;
     btn.disabled = true;
     btn.textContent = "生成中…";
+
+    var prevTransform = freezeScale();
 
     // scale:3 出高清图,适合发群/朋友圈; backgroundColor 保留主题自身背景
     window.snapdom
@@ -38,6 +57,7 @@
         scale: 3,
       })
       .then(function () {
+        restoreScale(prevTransform);
         btn.textContent = "已保存";
         setTimeout(function () {
           btn.textContent = defaultLabel;
@@ -45,6 +65,7 @@
         }, 1600);
       })
       .catch(function (err) {
+        restoreScale(prevTransform);
         console.error("分享卡片导出失败", err);
         btn.textContent = "生成失败";
         btn.title = "生成失败,可长按卡片手动截图";

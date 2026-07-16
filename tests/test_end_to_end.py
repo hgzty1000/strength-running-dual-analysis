@@ -23,6 +23,7 @@ os.environ["OWNER_USERNAME"] = "owner"
 os.environ["OWNER_PASSWORD"] = "test-pass"
 os.environ["ALLOW_PUBLIC_SIGNUP"] = "false"
 os.environ["LLM_BASE_URL"] = ""
+os.environ["OUTBOUND_API_ENABLED"] = "true"
 
 # 重新加载配置 (config 在导入时快照 env)
 import app.config as config_mod  # noqa: E402
@@ -518,6 +519,11 @@ def run() -> bool:
     check("snapdom vendor asset served", r.status_code == 200 and "SnapDOM" in r.text, f"status={r.status_code}")
     r = client.get("/static/js/share_export.js")
     check("share export script served", r.status_code == 200 and "snapdom" in r.text, f"status={r.status_code}")
+    # 窄屏适配脚本: 海报固定 450×600 逻辑尺寸, 靠等比缩放显示完整卡片 (修复移动端裁切)
+    r = client.get("/day/2026-06-30/share")
+    check("share page loads fit script", "/static/js/share_fit.js" in r.text, f"status={r.status_code}")
+    r = client.get("/static/js/share_fit.js")
+    check("share fit script served", r.status_code == 200 and "poster-scale" in r.text, f"status={r.status_code}")
 
     # 非法日期
     r = client.get("/day/notadate", follow_redirects=False)
@@ -567,6 +573,84 @@ def run() -> bool:
     # (e) 户外跑不计入跑步机聚合
     mixed = _treadmill_summary([_tm_run(140, 360), _tm_run(145, 300, indoor=False)])
     check("treadmill excludes outdoor runs", mixed["treadmill_run_count"] == 1, f"tm={mixed}")
+
+    # 16e. 对外只读 API (ADR 0004): 签发 / 鉴权 / 越权隔离 / 只读 / 吊销 / owner 权限
+    from app.api_keys import issue_api_key as _issue_key
+    from app.security import hash_password as _hp
+    from app.db import now_utc as _now, new_id as _nid
+
+    # owner id (供直接签发, 绕过一次性明文的页面机制)
+    with db() as conn:
+        owner_id = conn.execute("SELECT id FROM users WHERE username='owner'").fetchone()["id"]
+
+    # (a) owner 登录态可进签发页
+    r = client.get("/settings/api-keys")
+    check("api keys page visible to owner", r.status_code == 200 and "对外只读 API" in r.text, f"status={r.status_code}")
+
+    # (b) 无 bearer / 坏 bearer -> 401
+    r = client.get("/api/v1/meta")
+    check("api v1 no bearer -> 401", r.status_code == 401, f"status={r.status_code}")
+    r = client.get("/api/v1/meta", headers={"Authorization": "Bearer srda_bogus_key"})
+    check("api v1 bad bearer -> 401", r.status_code == 401, f"status={r.status_code}")
+
+    # (c) 签发一个真实 Key (直接调 issue, 拿一次性明文) 并调各只读端点
+    fresh = _issue_key(owner_id, "e2e-agent")
+    check("api key has srda_ prefix", fresh["raw_key"].startswith("srda_"), f"raw={fresh['raw_key'][:10]}")
+    ah = {"Authorization": "Bearer " + fresh["raw_key"]}
+    for path, label in [("/api/v1/meta", "meta"), ("/api/v1/context", "context"),
+                        ("/api/v1/days/2026-06-13", "day"), ("/api/v1/goals/current", "goals-current"),
+                        ("/api/v1/goals/history", "goals-history"), ("/api/v1/muscle-map", "muscle-map"),
+                        ("/api/v1/rest-notes", "rest-notes"), ("/api/v1/reports", "reports")]:
+        rr = client.get(path, headers=ah)
+        check(f"api v1 {label} works", rr.status_code == 200 and rr.json().get("ok") is True,
+              f"{path} status={rr.status_code}")
+
+    # context 应含 owner 的力量/跑步聚合 (owner 已导入 garmin 样本)
+    ctx = client.get("/api/v1/context", headers=ah).json()["data"]
+    check("api v1 context carries data", "running" in ctx and "strength" in ctx and "goal" in ctx,
+          f"keys={list(ctx.keys())}")
+
+    # (d) 越权隔离 (核心安全线): 造用户 B + B 的 Key, B 读到的 day detail 不含 owner 数据
+    b_id = "userb-" + _nid()[:8]
+    with db() as conn:
+        conn.execute("INSERT INTO users (id,username,password_hash,role,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+                     (b_id, "userb-" + b_id[-4:], _hp("x-pass"), "user", "active", _now(), _now()))
+    fresh_b = _issue_key(b_id, "b-agent")
+    bh = {"Authorization": "Bearer " + fresh_b["raw_key"]}
+    rb = client.get("/api/v1/days/2026-06-13", headers=bh)
+    b_day = rb.json().get("data", {}) if rb.status_code == 200 else {}
+    # owner 该日有跑步; B 无任何数据 -> B 的该日 running 应为空
+    check("api v1 cross-user isolation (B cannot see owner data)",
+          rb.status_code == 200 and not b_day.get("running") and not b_day.get("strength"),
+          f"b_running={b_day.get('running')} b_strength={b_day.get('strength')}")
+
+    # (e) 只读: POST 到 v1 端点 -> 405 (无写路由)
+    r = client.post("/api/v1/context", headers=ah)
+    check("api v1 rejects POST (read-only)", r.status_code == 405, f"status={r.status_code}")
+
+    # (f) 吊销后立即失效
+    revoked = _issue_key(owner_id, "to-revoke")
+    rh = {"Authorization": "Bearer " + revoked["raw_key"]}
+    check("api v1 fresh key works before revoke",
+          client.get("/api/v1/meta", headers=rh).status_code == 200, "should be 200 before revoke")
+    with db() as conn:
+        client_ok = client.post("/api/settings/api-keys/" + revoked["id"] + "/revoke", follow_redirects=False)
+    check("api key revoke redirects", client_ok.status_code == 303, f"status={client_ok.status_code}")
+    check("api v1 revoked key -> 401",
+          client.get("/api/v1/meta", headers=rh).status_code == 401, "should be 401 after revoke")
+
+    # (g) 非 owner 不能进签发页 / 不能签发: 用 B 登录验 403
+    #     (B 密码 x-pass, 先登出 owner 再以 B 登录)
+    client.post("/api/auth/logout", follow_redirects=False)
+    rb_login = client.post("/api/auth/login", data={"username": "userb-" + b_id[-4:], "password": "x-pass"}, follow_redirects=False)
+    check("user B can login", rb_login.status_code == 303, f"status={rb_login.status_code}")
+    r = client.get("/settings/api-keys", follow_redirects=False)
+    check("api keys page forbidden to non-owner", r.status_code == 403, f"status={r.status_code}")
+    r = client.post("/api/settings/api-keys", data={"label": "x"}, follow_redirects=False)
+    check("non-owner cannot issue key", r.status_code == 403, f"status={r.status_code}")
+    # 恢复 owner 登录, 供后续登出检查
+    client.post("/api/auth/logout", follow_redirects=False)
+    login(client)
 
     # 17. 登出
     r = client.post("/api/auth/logout", follow_redirects=False)

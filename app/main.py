@@ -37,6 +37,8 @@ from app.repositories import (
     start_xunji_sync,
 )
 from app.security import decrypt_secret, encrypt_secret, hash_password, mask_secret, new_token, token_hash, verify_password
+from app.api_keys import issue_api_key, list_api_keys, revoke_api_key
+from app.api_v1 import router as api_v1_router
 from app.services.garmin import family_label, variant_label
 from app.services.analysis import _goal_label as goal_label
 from app.markdown_lite import render as render_markdown
@@ -48,6 +50,7 @@ templates.env.globals["family_label"] = family_label
 templates.env.globals["goal_label"] = goal_label
 templates.env.globals["render_markdown"] = render_markdown
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.include_router(api_v1_router)
 
 SESSION_COOKIE = "sx_session"
 
@@ -467,6 +470,43 @@ def test_credential(request: Request, credential_type: str):
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"ok": False, "message": f"测试失败: {type(exc).__name__}"})
     raise HTTPException(status_code=400, detail="不支持的凭证类型")
+
+
+# ── 对外 API Key 管理 (仅 owner 代签, ADR 0004) ──
+# 签发时的一次性明文 Key: 暂存内存, 页面读取后立即清除; 绝不落库/进 URL/记日志。
+_pending_api_key: dict[str, str] = {}
+
+
+def _require_owner(request: Request) -> dict:
+    user = require_user(request)
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="仅所有者可管理对外 API Key")
+    return user
+
+
+@app.get("/settings/api-keys", response_class=HTMLResponse)
+def api_keys_page(request: Request):
+    user = _require_owner(request)
+    keys = list_api_keys(user["id"])
+    fresh = _pending_api_key.pop(user["id"], None)  # 一次性: 取出即清除
+    return page(request, "api_keys.html", api_keys=keys, fresh_key=fresh,
+                api_enabled=settings.outbound_api_enabled,
+                api_key_prefix=settings.api_key_prefix)
+
+
+@app.post("/api/settings/api-keys")
+def create_api_key(request: Request, label: Annotated[str, Form()] = ""):
+    user = _require_owner(request)
+    result = issue_api_key(user["id"], label)
+    _pending_api_key[user["id"]] = result["raw_key"]  # 供下一次页面加载一次性展示
+    return RedirectResponse("/settings/api-keys", status_code=303)
+
+
+@app.post("/api/settings/api-keys/{key_id}/revoke")
+def revoke_api_key_route(request: Request, key_id: str):
+    user = _require_owner(request)
+    revoke_api_key(user["id"], key_id)
+    return RedirectResponse("/settings/api-keys", status_code=303)
 
 
 @app.get("/goals/current", response_class=HTMLResponse)

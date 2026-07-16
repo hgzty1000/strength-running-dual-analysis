@@ -338,6 +338,20 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   error_json TEXT,
   created_at TEXT NOT NULL
 );
+
+-- 平台对外只读 API Key (ADR 0004): owner 后台代签, 绑定 user_id, 只存哈希 (不可逆),
+-- 签发时一次性明文显示, 之后仅凭 prefix 在列表识别; revoked_at 置值即失效。
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,
+  label TEXT,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id) WHERE revoked_at IS NULL;
 """
 
 

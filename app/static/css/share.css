@@ -1,6 +1,8 @@
 :root {
-  --poster-w: min(78vw, 450px);
-  --poster-h: calc(var(--poster-w) * 4 / 3);
+  /* 海报按固定逻辑尺寸绘制 (3:4), 与视口无关; 窄屏靠 .poster-scale 等比缩小显示。
+     这样导出的 PNG 永远是 450×600(×scale), 手机上是完整卡片的缩小版而非被裁切。 */
+  --poster-w: 450px;
+  --poster-h: 600px;
   --ink: #1e2a24;
   --muted: #748078;
   --line: rgba(30, 42, 36, .12);
@@ -14,6 +16,10 @@
 .share-page *, .share-page *::before, .share-page *::after { box-sizing: border-box; }
 .share-page a { color: inherit; }
 .share-shell { min-height: 100vh; padding: 42px 24px 126px; display: grid; place-items: center; background: radial-gradient(circle at 15% 10%, rgba(255,255,255,.8), transparent 25%), linear-gradient(135deg, #edf1ec 0%, #dfe8df 100%); }
+/* frame 占据缩放后的可视尺寸 (JS 按 scale 写死 width/height), 使卡片在流内正常居中且不被工具栏遮挡;
+   scale 用 transform 等比缩放海报, 不改变 #poster 自身的 450×600 逻辑尺寸 (导出保真)。 */
+.poster-frame { width: var(--poster-w); }
+.poster-scale { transform-origin: top left; }
 .poster { position: relative; width: var(--poster-w); height: var(--poster-h); overflow: hidden; isolation: isolate; border-radius: 24px; box-shadow: 0 24px 70px rgba(32, 48, 39, .18); background: var(--paper); }
 .poster::before, .poster::after { content: ""; position: absolute; pointer-events: none; z-index: -1; }
 .poster-content { position: relative; height: 100%; padding: 6% 9%; display: flex; flex-direction: column; }
@@ -23,14 +29,14 @@
 .brand-mark svg { width: 15px; height: 15px; }
 .edition { color: var(--muted); font-size: 9px; letter-spacing: .18em; text-transform: uppercase; }
 .date-block { margin-top: 6%; }
-.date { margin: 0; font-size: clamp(42px, 8vw, 58px); font-weight: 800; letter-spacing: -.07em; line-height: .95; }
+.date { margin: 0; font-size: 58px; font-weight: 800; letter-spacing: -.07em; line-height: .95; }
 .date span { color: var(--green); }
 .date-sub { margin: 7px 0 0; color: var(--muted); font-size: 12px; letter-spacing: .08em; }
 .hero-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 7%; }
 .hero-metrics.single { grid-template-columns: minmax(0, 1fr); }
 .hero-metric { padding: 12px 14px 11px; border-radius: 16px; background: rgba(47,111,78,.08); }
 .hero-metric.run { background: rgba(217,134,80,.10); }
-.metric-value { margin: 0; font-size: clamp(24px, 5vw, 34px); font-weight: 800; letter-spacing: -.065em; line-height: 1; white-space: nowrap; }
+.metric-value { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -.065em; line-height: 1; white-space: nowrap; }
 .metric-value em { font-size: .42em; font-style: normal; font-weight: 700; letter-spacing: -.02em; }
 .metric-label { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
 .section { margin-top: 5.5%; }
@@ -67,12 +73,12 @@
 .editorial::after { width: 88%; height: 45%; left: -58%; bottom: -9%; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; }
 .editorial .brand-mark { color: #174a38; background: #e9ba71; }
 .editorial .edition, .editorial .date-sub, .editorial .metric-label, .editorial .run-context, .editorial .run-stat-label, .editorial .footer { color: rgba(248,242,229,.68); }
-.editorial .date { font-size: clamp(56px, 10vw, 76px); line-height: .85; letter-spacing: -.1em; }
+.editorial .date { font-size: 76px; line-height: .85; letter-spacing: -.1em; }
 .editorial .date span { color: #e9ba71; }
 .editorial .hero-metrics { gap: 0; margin-top: 7%; }
 .editorial .hero-metric { padding: 0 17px 0 0; border-radius: 0; background: transparent; }
 .editorial .hero-metric + .hero-metric { padding: 0 0 0 17px; border-left: 1px solid rgba(255,255,255,.25); }
-.editorial .metric-value { font-size: clamp(28px, 6vw, 42px); }
+.editorial .metric-value { font-size: 42px; }
 .editorial .metric-value em { color: #e9ba71; }
 .editorial .section { margin-top: 6%; }
 .editorial .section-head { margin-bottom: 14px; }
@@ -188,7 +194,6 @@
 .save-png-button:disabled { opacity: .6; cursor: default; }
 
 @media (max-width: 560px) {
-  :root { --poster-w: min(88vw, 450px); }
   .share-shell { padding: 20px 10px 106px; }
   .poster { border-radius: 18px; }
   .share-toolbar { bottom: 14px; }

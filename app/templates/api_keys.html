@@ -1,0 +1,57 @@
+{% from 'base.html' import layout_start, layout_end, card %}
+{{ layout_start('settings', '设置 / 对外 API', user) }}
+{% call card('对外只读 API') %}
+{% if not api_enabled %}
+<p><span class="badge danger">未启用</span> 平台当前未开启对外 API (.env 的 <code>OUTBOUND_API_ENABLED</code> 为 false)。可以在此签发 Key, 但 <code>/api/v1/*</code> 端点会返回 404, 需在 .env 启用并重启服务后生效。</p>
+{% else %}
+<p><span class="badge ok">已启用</span> 外部 agent 可持已签发的 Key 只读调用 <code>/api/v1/*</code>。</p>
+{% endif %}
+<p class="muted small">Key 绑定到你的账号, 持有者只能<strong>只读</strong>你自己的训练数据 (上下文/明细/目标/报告/肌群/休整/元数据)。API 不写入、不触发分析。请求头: <code>Authorization: Bearer {{ api_key_prefix }}...</code></p>
+{% endcall %}
+
+{% if fresh_key %}
+{% call card('新 Key 已生成 (仅此一次显示)') %}
+<p class="badge ok">请立即复制保存。离开本页后将无法再次查看完整 Key, 只能吊销后重新签发。</p>
+<div class="form inline">
+  <input type="text" readonly value="{{ fresh_key }}" onclick="this.select()" style="flex:1;font-family:monospace">
+  <button type="button" onclick="navigator.clipboard.writeText('{{ fresh_key }}').then(()=>{this.textContent='已复制'})">复制</button>
+</div>
+{% endcall %}
+{% endif %}
+
+{% call card('签发新 Key') %}
+<form method="post" action="/api/settings/api-keys" class="form inline">
+  <input name="label" type="text" placeholder="备注 (可选, 如: 我的分析 agent)" maxlength="60">
+  <button>签发 Key</button>
+</form>
+{% endcall %}
+
+{% call card('已签发的 Key') %}
+{% if api_keys %}
+<table class="data-table">
+  <thead><tr><th>前缀</th><th>备注</th><th>创建时间</th><th>最后使用</th><th>状态</th><th></th></tr></thead>
+  <tbody>
+  {% for k in api_keys %}
+    <tr>
+      <td><code>{{ k.prefix }}…</code></td>
+      <td>{{ k.label or '—' }}</td>
+      <td class="muted small">{{ k.created_at[:16].replace('T', ' ') }}</td>
+      <td class="muted small">{% if k.last_used_at %}{{ k.last_used_at[:16].replace('T', ' ') }}{% else %}从未{% endif %}</td>
+      <td>{% if k.revoked_at %}<span class="badge danger">已吊销</span>{% else %}<span class="badge ok">有效</span>{% endif %}</td>
+      <td>
+        {% if not k.revoked_at %}
+        <form method="post" action="/api/settings/api-keys/{{ k.id }}/revoke" onsubmit="return confirm('吊销后持有此 Key 的 agent 立即失去访问权, 且不可恢复。确认吊销?')">
+          <button type="submit" class="secondary">吊销</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">还没有签发任何 Key。</p>
+{% endif %}
+{% endcall %}
+<a class="button secondary" href="/settings/credentials">凭证</a>
+{{ layout_end() }}
