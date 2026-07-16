@@ -1,13 +1,13 @@
 # 接口/API 设计
 
 - 日期: 2026-07-09
-- 状态: 草案
+- 状态: 已实现 (v0.4.0)
 - 上游文档:
   - [Demo 范围与信息架构设计](./demo-scope-and-information-architecture.md)
   - [低保真 UE 设计](./low-fidelity-ue.md)
   - [技术架构设计](./technical-architecture.md)
   - [数据模型设计](./data-model.md)
-- 用途: 固定 demo P0 Web 单体内部 HTTP 接口边界。本文描述网页端使用的服务端接口,不是未来对外只读 Open API。
+- 用途: §1–§11 为网页端 Session API 接口边界; §12 为**已实现的外部只读 API v1**, 供外部 Agent 只读消费。
 
 ---
 

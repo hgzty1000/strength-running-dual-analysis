@@ -34,11 +34,11 @@ Demo 第一版要验证的核心闭环:
 1. **轻量可部署**:适配 2GB 云服务器,不引入重型基础设施。
 2. **多用户从第一天建模**:即使 demo 只有 owner,所有数据也必须按 `user_id` 隔离。
 3. **环境无关**:协议、域名/IP、CORS、Cookie 策略、LLM 地址/模型等走配置。
-4. **凭证安全**:训记 Key、LLM Key、未来平台 API Key 均加密存储,不写日志、不完整回显。
+4. **凭证安全**:训记 Key、LLM Key 均 AES-GCM 加密存储;平台 API Key 为独立 `api_keys` 表 hash-only 存储,明文仅签发时一次性显示。均不写日志、不完整回显。
 5. **分析层只读数据**:AI 分析、浅追问、目标澄清都不能偷偷改运动数据。
 6. **报告可复盘**:报告保存为快照,旧报告不因数据/目标变化被无痕修改。
 7. **FIT 扩展性**:Garmin/FIT 入口按通用活动设计,不写死为跑步专用。
-8. **对外 API 预留**:demo 不实现实际端点,但上下文生产层和按 `user_id` 数据访问层必须摆正。
+8. **对外 API v1 已实现**:`/api/v1/*` 共 9 个只读 GET 端点, Bearer Key 鉴权, 按 user_id 隔离, 不写入/不同步/不触发 LLM。外部 Agent 可通过 `skills/strength-running-readonly-api/` 的 curl 指南调用。上下文生产层和按 `user_id` 数据访问层已到位。
 
 ---
 
@@ -216,7 +216,6 @@ Key 类型:
 ```text
 xunji_key: 用户自己训记账号通行证
 llm_key: 平台所有者给该用户配置的模型商 Key
-platform_api_key: 未来只读 API 预留,demo 不实现
 ```
 
 安全规则:
@@ -505,13 +504,13 @@ Demo P0:
 
 ---
 
-### 4.13 External Read-only API Reserved
+### 4.13 External Read-only API v1 (Implemented)
 
-Demo 不实现实际端点,但架构必须预留:
+v0.4.0 已实现 `/api/v1/*` 共 9 个只读 GET 端点:
 
-- Analysis Context Builder 独立成层。
-- 数据访问按 `user_id` 解耦,不绑死网页 session。
-- 未来 API 只读返回平台已拥有/已算好的存量:
+- Analysis Context Builder 独立成层 (复用 `build_context`)。
+- 数据访问按 `user_id` 解耦,不绑死网页 session (API Key → `resolve_api_key()` → `user_id`)。
+- API 只读返回平台已拥有/已算好的存量:
   - 原始训练数据。
   - 加工上下文。
   - 当前/历史目标配置。
@@ -519,6 +518,8 @@ Demo 不实现实际端点,但架构必须预留:
   - 休整标注。
   - 动作肌群映射。
   - 元数据。
+
+鉴权: Bearer `srda_` Key (`api_keys` 表, hash-only 存储)。外部 Agent 调用指南见 `skills/strength-running-readonly-api/`。
 
 明确排除:
 - 外部 agent 写回。
@@ -637,9 +638,10 @@ User updates data / goal / rest note
 ### 6.2 凭证
 
 - user_credentials
-  - xunji_key encrypted
-  - llm_key encrypted
-  - platform_api_key encrypted(预留)
+  - xunji_key encrypted (AES-GCM)
+  - llm_key encrypted (AES-GCM)
+- api_keys
+  - platform_api_key hash-only (SHA-256); 明文仅签发时一次性显示, 多 Key, 可分别吊销
 
 ### 6.3 训记镜像
 

@@ -2,8 +2,8 @@
 
 力量 + 跑步双线训练分析 demo。整合**训记**(力量)与 **Garmin**(跑步)数据,基于当前目标配置和休整标注,生成可存档的双线分析报告,识别冲突/过量风险并给出方向性建议。
 
-当前版本: **v0.3.0**  
-交接/现状速览: [docs/HANDOVER.md](docs/HANDOVER.md)  
+当前版本: **v0.4.0**
+交接/现状速览: [docs/HANDOVER.md](docs/HANDOVER.md)
 需求/术语背景: [CONTEXT.md](CONTEXT.md)
 
 ---
@@ -20,6 +20,12 @@
 - 系统只给**方向性建议**,不扮演医疗或完整教练角色
 
 ---
+
+## v0.4 亮点
+
+- **对外只读 API v1**: 9 个 `/api/v1/*` 端点 (meta/context/days/goals/reports/muscle-map/rest-notes), Bearer `srda_` Key 鉴权, 按 user_id 隔离, 只读存量、不触发 LLM。owner 可签发/吊销 Key (`/settings/api-keys`)。已部署并完成真实云端调用验证。
+- **外部 Agent 调用支持**: `skills/strength-running-readonly-api` 提供标准 Agent Skill 与通用 LLM 指令文档, 外部 Agent 可通过 curl 只读消费平台训练数据。
+- **站点 favicon**: 分享卡片品牌图标复用为全站网页图标。
 
 ## v0.3 亮点
 
@@ -131,7 +137,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 python tests/test_end_to_end.py
 ```
 
-当前回归状态: **135 / 135 checks passed**
+当前回归状态: **164 / 164 checks passed**
 
 覆盖包括:
 - 登录 / 鉴权
@@ -164,6 +170,7 @@ python tests/test_end_to_end.py
 - 需求 / 术语 / 背景: [CONTEXT.md](CONTEXT.md)
 - 设计文档: [docs/design/](docs/design/)
 - ADR: [docs/adr/](docs/adr/)
+- 外部 Agent 调用指南: [skills/strength-running-readonly-api/](skills/strength-running-readonly-api/)
 
 ---
 
@@ -172,3 +179,4 @@ python tests/test_end_to_end.py
 - `v0.1` — P0 核心闭环,51 项测试
 - `v0.2` — AI 目标澄清 / 浅追问 / 温度热解读 / 数据看板,113 项测试
 - `v0.3` — 单日训练分享卡片(7 种视觉方案,3:4 竖版,隐私过滤),135 项测试
+- `v0.4` — 对外只读 API v1 (9 端点, Bearer Key, 按 user 隔离) + 外部 Agent 调用 skill + 站点 favicon, 164 项测试

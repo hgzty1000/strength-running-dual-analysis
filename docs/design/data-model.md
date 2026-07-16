@@ -172,12 +172,12 @@ updated_at          text not null
 
 ### 4.2 `user_credentials`
 
-用途:每用户凭证加密存储。
+用途:每用户凭证加密存储 (AES-GCM)。仅用于训记 Key 与 LLM Key;平台对外 API Key 使用独立的 `api_keys` 表 (hash-only, 见 §4.2b)。
 
 ```text
 id                  text primary key
 user_id             text not null references users(id)
-credential_type     text not null          -- xunji_key / llm_key / platform_api_key
+credential_type     text not null          -- xunji_key / llm_key
 ciphertext          text not null
 nonce               text not null
 key_version         text not null
@@ -197,6 +197,30 @@ unique(user_id, credential_type) where revoked_at is null
 - 明文只在内存中短暂使用。
 - 日志不输出明文。
 - API 返回只显示是否配置和掩码。
+
+### 4.2b `api_keys` (平台对外 API Key, hash-only)
+
+用途:平台签发给外部 Agent 的只读 API Key。**明文仅签发时一次性显示**,之后不可再现;库内存 SHA-256 hash。
+
+```text
+id                  text primary key
+user_id             text not null references users(id)
+key_hash            text not null          -- SHA-256(plaintext)
+prefix              text not null          -- "srda_" + 前6位随机字符, 供识别
+label               text null              -- 用户自定义标签
+created_at          text not null
+last_used_at        text null              -- 每次鉴权命中即更新
+revoked_at          text null              -- 非 NULL 即为已吊销
+```
+
+约束:
+- 无 unique 跨 Key 约束 — 用户可持有多个活跃 Key,可分别吊销。
+- `resolve_api_key(raw_key)` → SHA-256 → 查库 → 返回 `user_id` (仅当未吊销且 user 状态 active)。
+
+与 `user_credentials` 的关键区别:
+- **不可解密**:不存明文,不存可逆密文。Key 丢失只能吊销后重签,无法恢复。
+- **多 Key**:每用户不限一个 Key,适合不同 Agent/场景分别管理。
+- **绑定 user_id**:天然复用多用户隔离,A 的 Key 物理上读不到 B 的数据。
 
 ---
 

@@ -45,12 +45,13 @@
 - 负面:demo 期需守两条解耦纪律(上下文层、数据访问层),略增前期结构约束——与「环境无关设计」「多用户从第一天建模」同源的"便宜时先填坑"。
 - **遗留待议**:若未来出现明确场景,可单独讨论更复杂的费用/额度模型;但外部 agent 写回平台不在当前路线内,本 ADR 将其明确排除。
 
-## 实现追记(2026-07-16,v0.4.0)
+## 实现追记(2026-07-17,v0.4.0)
 
-预留期结束,对外 API 已从"架构预留"落地为**实际端点**,决策边界与本 ADR 完全一致(只读存量、按 `user_id` 解耦、复用两层)。落地事实:
+预留期结束,对外 API 已从"架构预留"落地为**实际端点**,决策边界与本 ADR 完全一致(只读存量、按 `user_id` 解耦、复用两层)。落地事实 + 近期追加:
 
-- **端点**:`/api/v1/*` 共 9 个只读端点(见 [api-design.md](../design/api-design.md) §15)。生产者复用既有 `build_context` / `day_detail` / 仓储查询,未新造业务逻辑——ADR 预留的"上下文生产层独立"在此兑现。
-- **鉴权**:`Authorization: Bearer srda_...` → `app/api_keys.py` 的 `resolve_api_key()` 解析出 `user_id`,端点按该 user 取数,天然复用多用户隔离(A 的 Key 拿不到 B 的数据)。Key 每用户可签发、加密存储、可吊销,与训记/LLM Key 同构。owner 在"设置 → 凭证 → 对外 API Key"页签发/吊销。
+- **端点**:`/api/v1/*` 共 9 个只读端点(见 [api-design.md](../design/api-design.md) §12)。生产者复用既有 `build_context` / `day_detail` / 仓储查询,未新造业务逻辑——ADR 预留的"上下文生产层独立"在此兑现。2026-07-16 完成真实云端 curl 调用验证(meta/context/days),有效 Key 200,无凭证/假 Key 401,跨用户隔离正确。
+- **鉴权**:`Authorization: Bearer srda_...` → `app/api_keys.py` 的 `resolve_api_key()` 解析出 `user_id`,端点按该 user 取数,天然复用多用户隔离(A 的 Key 拿不到 B 的数据)。Key 存于独立 `api_keys` 表:**仅存 sha256 哈希**(非可逆加密),明文仅签发时一次性显示,之后不可再现。每用户可签发多个 Key,可分别吊销。owner 在"设置 → 凭证 → 对外 API Key"页签发/吊销。
+- **外部调用指南**:`skills/strength-running-readonly-api/` 提供 Agent Skill (`SKILL.md`) 和通用 LLM 指令 (`LLM-INSTRUCTIONS.md`),外部 Agent 可通过 curl 只读消费平台数据。
 - **只读边界守住**:所有端点仅 `GET`;POST/PUT/DELETE 到 `/api/v1/*` 返回 405。不触发 LLM、不写库。
 - **总开关**:`.env` 的 `OUTBOUND_API_ENABLED`(默认 `false`)。**为 false 时整个 `/api/v1/*` 返回 404「对外 API 未启用」**,连鉴权都不走——这是"默认关闭、显式开启"的安全默认。生产已设为 `true`。
 - **安全提醒**:当前仍是方案 A(明文 HTTP),Bearer Key 在信道上可被嗅探。对外开放/给他人接入须等方案 C(HTTPS,见 ADR 0001)。自用/可信网络先行。
