@@ -420,7 +420,39 @@ Demo 可不做删除。若实现,只做软删除。
 
 ---
 
-## 12. Admin 预留
+## 12. 对外只读 API v1 (已实现, ADR 0004)
+
+对外 Open API,供外部 AI agent 只读消费本平台数据。**从 ADR 0004 的"架构预留"转为实际端点**(2026-07-16 上线 v0.4.0)。代码位于 [app/api_v1.py](../../app/api_v1.py) + [app/api_keys.py](../../app/api_keys.py)。
+
+**开关**:受环境变量 `OUTBOUND_API_ENABLED` 门控(默认 `false`)。未启用时所有 `/api/v1/*` 返回 `404 {"code":404,"message":"对外 API 未启用"}`。生产 `.env` 已设 `OUTBOUND_API_ENABLED=true`。
+> ⚠️ 部署注意:systemd unit **无 `EnvironmentFile=`**,靠 [app/config.py](../../app/config.py) 的 `_load_dotenv()` 读项目根 `.env`。改开关后必须 `systemctl restart` 才生效;仅改 `.env` 不重启无效。
+
+**鉴权**:`Authorization: Bearer srda_...`。Key 绑定 `user_id`,agent 只能读该用户自己的数据(复用 ADR 0003 多用户隔离,不引入新信任模型)。
+- 缺 Bearer / Key 无效或已吊销 → `401`。
+- Key 每用户可签发多个,`srda_` 前缀,明文仅签发时一次性显示,库内存哈希,可单独吊销。
+- 签发/吊销:owner 在 `GET /settings/api-keys` 页面操作(`POST /api/settings/api-keys`、`POST /api/settings/api-keys/{key_id}/revoke`)。
+
+**边界**:只读存量,不写入、不触发 LLM 分析(见 ADR 0004)。所有端点复用 Web 已有生产者(`build_context`/`day_detail`/查库),不新造业务逻辑。POST 到只读端点 → `405`。
+
+```text
+GET /api/v1/meta                元数据: 数据覆盖 / 同步状态
+GET /api/v1/context             加工上下文 (喂 LLM 那份); 默认最近 90 天, ?start=&end= 覆盖
+GET /api/v1/days/{datestr}      某日训练明细 (YYYY-MM-DD)
+GET /api/v1/goals/current       当前生效目标配置
+GET /api/v1/goals/history       目标历史版本 (含当前)
+GET /api/v1/reports             历史分析报告列表 (摘要, 不含全文)
+GET /api/v1/reports/{report_id} 某份报告快照全文 (结构化层 + 叙述层)
+GET /api/v1/muscle-map          动作→肌群映射表
+GET /api/v1/rest-notes          休整标注
+```
+
+统一响应包络:成功 `{"ok":true,"data":...}`;错误 `{"ok":false,"error":{"code":...,"message":...}}`。
+
+> 安全提醒:当前是方案 A(明文 HTTP,见 ADR 0001),Bearer Key 在信道上可被嗅探。对外开放/分享 Key 需等方案 C(HTTPS)。
+
+---
+
+## 13. Admin 预留
 
 Demo P0 不实现 UI,但未来端点可能包括:
 
@@ -435,23 +467,24 @@ P0 不做。
 
 ---
 
-## 13. 安全要求
+## 14. 安全要求
 
-- 所有 `/api/*` 除 login 外都需要 session。
-- 所有查询都按当前 session `user_id` 过滤。
+- 所有 `/api/*` 除 login 外都需要 session(`/api/v1/*` 例外:走 Bearer Key,不用 session)。
+- 所有查询都按当前 `user_id` 过滤(session 或 API Key 解析而来)。
 - owner/admin 端点额外检查 role。
 - 上传接口限大小、限类型。
 - 错误不带内部堆栈。
 - 日志不记录凭证明文。
-- 外部 API 只读预留,不复用 P0 写状态接口。
+- 外部 API(§12)只读存量,不复用写状态接口,不触发 LLM 分析。
 
 ---
 
-## 14. 下一步
+## 15. 下一步
 
-接口设计之后:
+接口设计之后(已完成的垂直切片见 HANDOVER):
 
-1. 选择技术栈。
-2. 搭建项目脚手架。
-3. 建立 SQLite migration。
-4. 实现 owner 登录 + 设置 + Garmin 导入的第一条垂直切片。
+1. ~~选择技术栈~~ ✅ Python 3.14 + FastAPI + Jinja2。
+2. ~~搭建项目脚手架~~ ✅。
+3. ~~建立 SQLite migration~~ ✅。
+4. ~~实现 owner 登录 + 设置 + Garmin 导入的第一条垂直切片~~ ✅。
+5. 剩余路线见 [HANDOVER](../HANDOVER.md) §8:HTTPS(方案 C)、营养素建议、邀请码注册 UI 等。
